@@ -66,11 +66,18 @@ fi
 ISO_PATH_ROOT=$(dirname "$DUMMY_PATH")
 
 # --- Cleanup Trap ---
-# Remove generated ISO if script fails to prevent orphaned files
+# Remove generated ISO / partially created VM if script fails, to prevent
+# orphaned files and half-configured VMs blocking a retry with the same VMID.
+# VM_CREATED is set to 1 right after `qm create` succeeds below.
+VM_CREATED=0
 cleanup() {
     if [ -f "$ISO_PATH_ROOT/$OEM_ISO" ]; then
         echo "Cleaning up generated ISO..."
         rm -f "$ISO_PATH_ROOT/$OEM_ISO"
+    fi
+    if [ "$VM_CREATED" = "1" ]; then
+        echo "Cleaning up partially created VM $VMID..."
+        qm destroy "$VMID" --purge 1 2>/dev/null || true
     fi
 }
 trap cleanup ERR
@@ -202,7 +209,7 @@ download_virtio_iso() {
 # --- Checks ---
 
 # Check if VM ID exists
-if qm status $VMID &>/dev/null; then
+if qm status "$VMID" &>/dev/null; then
     echo "Error: VM ID $VMID already exists"
     exit 1
 fi
@@ -291,7 +298,7 @@ echo "Creating VM $VMID ($VM_NAME)..."
 
 # 1. Create the base VM with Memory, CPU, Network, and OS Type
 # We use virtio-scsi-pci for the controller to allow for better disk features
-qm create $VMID \
+qm create "$VMID" \
   --name "$VM_NAME" \
   --memory "$VM_MEMORY" \
   --cores "$VM_CORES" \
@@ -302,30 +309,35 @@ qm create $VMID \
   --cpu host \
   --machine q35 \
   --bios ovmf
+VM_CREATED=1
 
 # 2. Add the Main Disk (SCSI) with SSD emulation and Discard
 # This command automatically allocates the volume on the storage
 echo "Allocating Main Disk..."
-qm set $VMID --scsi0 $DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on
+qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on"
 
 # 3. Add EFI Disk and TPM (Required for Win11)
 # We let Proxmox handle the allocation logic
 echo "Configuring TPM and UEFI..."
-qm set $VMID --efidisk0 $DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1
-qm set $VMID --tpmstate0 $DISK_STORAGE:0,version=v2.0
+qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1"
+qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
 
 # 4. Attach ISOs
+# NOTE: these values are quoted as a single argument since WIN_ISO/VIRTIO_ISO
+# come from filenames on disk and may contain spaces (e.g. a Windows ISO
+# downloaded via browser). Without quoting, bash word-splits on the space and
+# `qm set` fails with "400 too many arguments".
 echo "Attaching ISOs..."
-qm set $VMID --ide2 $ISO_STORAGE_ID:iso/$WIN_ISO,media=cdrom
-qm set $VMID --ide3 $ISO_STORAGE_ID:iso/$VIRTIO_ISO,media=cdrom
+qm set "$VMID" --ide2 "$ISO_STORAGE_ID:iso/$WIN_ISO,media=cdrom"
+qm set "$VMID" --ide3 "$ISO_STORAGE_ID:iso/$VIRTIO_ISO,media=cdrom"
 # Attach the generated answer file ISO
-qm set $VMID --sata0 $ISO_STORAGE_ID:iso/$OEM_ISO,media=cdrom
+qm set "$VMID" --sata0 "$ISO_STORAGE_ID:iso/$OEM_ISO,media=cdrom"
 
 # 5. Set Boot Order and Other Settings
 echo "Finalizing Configuration..."
-qm set $VMID --boot order='ide2;ide3;sata0;scsi0'
-qm set $VMID --agent enabled=1,fstrim_cloned_disks=1
-qm set $VMID --tablet 1
+qm set "$VMID" --boot order='ide2;ide3;sata0;scsi0'
+qm set "$VMID" --agent enabled=1,fstrim_cloned_disks=1
+qm set "$VMID" --tablet 1
 
 echo "================================================"
 echo "VM $VMID created successfully!"
