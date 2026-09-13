@@ -70,28 +70,9 @@
         </component>
         <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <!--
-                WinPE assigns CD-ROM drive letters based on how many optical
-                devices are attached, so the VirtIO ISO isn't guaranteed to
-                land on E: or F: - with the Windows ISO, VirtIO ISO, and
-                OEMDRV answer-file ISO all attached (3 optical devices), it
-                can just as easily end up on D:, G:, or H:. Search a wider
-                range so driver injection doesn't silently fail to find
-                vioscsi/NetKVM, which leaves Windows Setup unable to see the
-                target disk during the automated DiskConfiguration step above
-                and crashes WinPE (observed as a reset before language
-                selection - see CLAUDE.md).
-
-                IMPORTANT: win11.sh attaches the main disk via the
-                scsihw=virtio-scsi-pci controller (scsi0 disk), i.e. a
-                VirtIO-SCSI controller - the matching Windows driver is
-                vioscsi, NOT viostor (viostor is for the older VirtIO-BLOCK
-                device type, a different PCI hardware ID; Windows Setup's
-                "Load Driver" hides drivers that don't match present
-                hardware by default, so viostor being present on the ISO
-                doesn't help here and silently looks like "no driver
-                found"). If win11.sh's disk attachment ever changes to a
-                virtio0 device instead of scsi0, switch this back to
-                viostor.
+                Drive letters D:-H: cover WinPE's shifting CD-ROM assignment.
+                vioscsi (not viostor) matches win11.sh's virtio-scsi-pci
+                controller - see CLAUDE.md.
             -->
             <DriverPaths>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="1">
@@ -131,15 +112,8 @@
     <settings pass="specialize">
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <ComputerName>*</ComputerName> </component>
-        <!--
-            This is a DIFFERENT component from Microsoft-Windows-International-Core-WinPE
-            above - that one only sets the language/locale for Windows Setup's own UI
-            during install. This one sets the locale for the INSTALLED OS. Without it,
-            OOBE has no indication the region/language question has already been
-            answered, so it prompts for it on first boot even though Setup itself
-            wasn't prompted (this is what a UK user hitting an interactive language
-            picker after a fully-unattended install turned out to be).
-        -->
+        <!-- Sets the installed OS's locale (the -WinPE component above only
+             covers Setup's own UI language) - see CLAUDE.md. -->
         <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <InputLocale>en-GB</InputLocale>
             <SystemLocale>en-GB</SystemLocale>
