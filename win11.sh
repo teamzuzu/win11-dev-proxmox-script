@@ -38,6 +38,28 @@ DISK_SIZE="128" # GiB, no unit suffix - `qm set --scsiN storage:SIZE` parses SIZ
                 # "unable to parse lvm/... volume name '130G'" on lvm/zfs storage.
 OS_TYPE="win11"
 
+# --- Filename Validation ---
+# ISO filenames get embedded straight into `qm set`'s comma-separated
+# storage:volid,property=value syntax. A filename containing characters
+# that syntax is sensitive to (or a broken download that saved raw
+# Content-Disposition header text as the filename - see the
+# download_windows_iso header parsing above) produces a confusing Proxmox
+# "400 Parameter verification failed" deep inside the ISO-attach step
+# instead of a clear error here. Reject anything that isn't a plain,
+# well-formed .iso filename before we ever get that far.
+validate_iso_filename() {
+    local label="$1" filename="$2"
+    if [[ "$filename" != *.iso ]]; then
+        echo "Error: $label filename '$filename' does not end in .iso - refusing to use it."
+        return 1
+    fi
+    if [[ "$filename" == *[,\;=\"\']* ]]; then
+        echo "Error: $label filename '$filename' contains characters (, ; = \" ') that break Proxmox's volume syntax."
+        echo "This usually means a broken download saved raw header text into the filename - rename the file (keeping only the part up to and including .iso) and try again."
+        return 1
+    fi
+}
+
 # --- Dynamic Path Resolution ---
 # We ask Proxmox where the ISOs are actually stored for the given Storage ID
 # This avoids hardcoding paths like /var/lib/vz or /mnt/pve/...
@@ -108,9 +130,14 @@ download_windows_iso() {
     # Default name if extraction fails
     local target_filename="Win11_English_x64.iso"
     
-    # Use curl to get the filename from headers if possible
+    # Use curl to get the filename from headers if possible.
+    # NOTE: servers commonly send an UNQUOTED `filename=...` followed by a
+    # second `filename*=UTF-8''...` parameter (RFC 5987 extended value) on the
+    # same header line. The capture group must stop at a semicolon as well as
+    # a closing quote, or - when the first filename is unquoted - it swallows
+    # the rest of the line, including the second parameter, into the "filename".
     if command -v curl &> /dev/null; then
-        local header_name=$(curl -sI "$DOWNLOAD_URL" | grep -i "content-disposition" | sed -n 's/.*filename="\?\([^"]*\)"\?.*/\1/p' | tr -d '\r')
+        local header_name=$(curl -sI "$DOWNLOAD_URL" | grep -i "content-disposition" | sed -n 's/.*[Ff]ilename="\?\([^";]*\)"\?.*/\1/p' | tr -d '\r')
         if [ -n "$header_name" ]; then
             target_filename="$header_name"
         fi
@@ -250,6 +277,10 @@ else
     fi
 fi
 
+if ! validate_iso_filename "Windows 11 ISO" "$WIN_ISO"; then
+    exit 1
+fi
+
 # Check for VirtIO ISO (any version - pick the newest if more than one is present)
 echo "Searching for VirtIO ISO in $ISO_PATH_ROOT..."
 FOUND_VIRTIO=$(find "$ISO_PATH_ROOT" -maxdepth 1 -iname "virtio-win*.iso" -type f | sort -V | tail -n 1)
@@ -263,6 +294,10 @@ else
         echo "Download manually from: https://github.com/virtio-win/virtio-win-pkg-scripts/blob/master/README.md"
         exit 1
     fi
+fi
+
+if ! validate_iso_filename "VirtIO ISO" "$VIRTIO_ISO"; then
+    exit 1
 fi
 
 # Check for local answer file
