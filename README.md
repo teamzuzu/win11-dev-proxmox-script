@@ -71,6 +71,15 @@ The answer file handles the Windows setup. Key configurations include:
 ### 1. Proxmox VE
 Tested on Proxmox VE 8.x. Should work on 7.x as well.
 
+### 0. Running as a non-root user
+`win11.sh` runs `qm`, `pvesm`, `genisoimage`, and all ISO-storage file operations through `sudo`, so it no longer needs to be run as `root` directly — any user with `sudo` rights can run it. The script checks `sudo -v` up front and exits with a clear error if that fails. Since parts of the ISO-handling flow are unattended (auto-downloading the VirtIO ISO, generating the answer-file ISO), it's worth giving this user passwordless `sudo` for a smooth run rather than being prompted for a password partway through:
+
+```bash
+echo "youruser ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/win11-dev-script
+```
+
+(Scope this to just the commands the script needs — `qm`, `pvesm`, `genisoimage`, `wget`/`curl`, etc. — if you'd rather not grant blanket `NOPASSWD` access.)
+
 ### 2. Required ISOs
 You must upload these ISOs to your Proxmox ISO storage (`ISO_STORAGE_ID`, default `local`) before running the script:
 
@@ -133,8 +142,8 @@ The VS2022 installation is large (~10GB download). If the VM seems idle after fi
 
 ### VirtIO drivers not loading
 - Verify the VirtIO ISO is correctly attached to the VM
-- The answer file checks both `E:\` and `F:\` drive letters automatically
-- If needed, manually browse to the VirtIO ISO during Windows setup
+- The answer file checks drive letters `D:` through `H:` automatically (WinPE's CD-ROM drive letter assignment shifts depending on how many optical devices are attached)
+- If needed, manually browse to the VirtIO ISO's `vioscsi\w11\amd64` folder during Windows setup — not `viostor`, since the disk is attached via a VirtIO-SCSI controller
 
 ## 📝 License
 

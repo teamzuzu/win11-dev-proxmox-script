@@ -21,6 +21,20 @@ warn()    { printf '%b%s%b\n' "$C_YELLOW" "$*" "$C_RESET"; }
 error()   { printf '%b%s%b\n' "$C_RED" "$*" "$C_RESET" >&2; }
 banner()  { printf '%b%s%b\n' "$C_BOLD$C_CYAN" "$*" "$C_RESET"; }
 
+# --- sudo preflight ---
+# This script now runs qm/pvesm/genisoimage and every file operation on ISO
+# storage through sudo so it can be run as a regular user (see CLAUDE.md).
+# Fail fast with a clear message rather than dying midway through with a
+# confusing error if sudo isn't usable at all.
+if ! command -v sudo &> /dev/null; then
+    error "Error: sudo is required (this script runs privileged commands via sudo) but isn't installed."
+    exit 1
+fi
+if ! sudo -v; then
+    error "Error: sudo authentication failed. This user needs sudo access to run win11.sh."
+    exit 1
+fi
+
 # --- Default Configuration ---
 VMID="1022"
 VM_NAME="win11-ide"
@@ -87,7 +101,7 @@ get_iso_path() {
     local filename="$1"
     # pvesm path returns the full filesystem path for a volume
     # Syntax: pvesm path <STORAGE_ID>:iso/<FILENAME>
-    pvesm path "$ISO_STORAGE_ID:iso/$filename" 2>/dev/null
+    sudo pvesm path "$ISO_STORAGE_ID:iso/$filename" 2>/dev/null
 }
 
 # Resolve the root ISO directory by asking for a dummy file
@@ -99,7 +113,7 @@ get_iso_path() {
 # If the storage is not active or found, this might fail, so we check later.
 # (The "|| true" keeps a failed lookup from tripping `set -e` before we can
 # print a friendly error message below.)
-DUMMY_PATH=$(pvesm path "$ISO_STORAGE_ID:iso/dummy.iso" 2>/dev/null) || true
+DUMMY_PATH=$(sudo pvesm path "$ISO_STORAGE_ID:iso/dummy.iso" 2>/dev/null) || true
 if [ -z "$DUMMY_PATH" ]; then
     error "Error: Could not resolve path for storage '$ISO_STORAGE_ID'."
     error "Please check if the Storage ID exists and is active in Proxmox."
@@ -113,13 +127,13 @@ ISO_PATH_ROOT=$(dirname "$DUMMY_PATH")
 # VM_CREATED is set to 1 right after `qm create` succeeds below.
 VM_CREATED=0
 cleanup() {
-    if [ -f "$ISO_PATH_ROOT/$OEM_ISO" ]; then
+    if sudo test -f "$ISO_PATH_ROOT/$OEM_ISO"; then
         warn "Cleaning up generated ISO..."
-        rm -f "$ISO_PATH_ROOT/$OEM_ISO"
+        sudo rm -f "$ISO_PATH_ROOT/$OEM_ISO"
     fi
     if [ "$VM_CREATED" = "1" ]; then
         warn "Cleaning up partially created VM $VMID..."
-        qm destroy "$VMID" --purge 1 2>/dev/null || true
+        sudo qm destroy "$VMID" --purge 1 2>/dev/null || true
     fi
 }
 trap cleanup ERR
@@ -157,7 +171,7 @@ download_windows_iso() {
     # a closing quote, or - when the first filename is unquoted - it swallows
     # the rest of the line, including the second parameter, into the "filename".
     if command -v curl &> /dev/null; then
-        local header_name=$(curl -sI "$DOWNLOAD_URL" | grep -i "content-disposition" | sed -n 's/.*[Ff]ilename="\?\([^";]*\)"\?.*/\1/p' | tr -d '\r')
+        local header_name=$(sudo curl -sI "$DOWNLOAD_URL" | sudo grep -i "content-disposition" | sudo sed -n 's/.*[Ff]ilename="\?\([^";]*\)"\?.*/\1/p' | sudo tr -d '\r')
         if [ -n "$header_name" ]; then
             target_filename="$header_name"
         fi
@@ -167,13 +181,13 @@ download_windows_iso() {
     info "Downloading to: $ISO_PATH_ROOT/$target_filename"
 
     if command -v wget &> /dev/null; then
-        wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
+        sudo wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
             "$DOWNLOAD_URL" || {
             error "Error: Download failed."
             return 1
         }
     elif command -v curl &> /dev/null; then
-        curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
+        sudo curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
             "$DOWNLOAD_URL" || {
             error "Error: Download failed."
             return 1
@@ -184,8 +198,8 @@ download_windows_iso() {
     fi
 
     # Verify download
-    if [ -f "$ISO_PATH_ROOT/$target_filename" ]; then
-        FILE_SIZE=$(stat -c%s "$ISO_PATH_ROOT/$target_filename" 2>/dev/null || stat -f%z "$ISO_PATH_ROOT/$target_filename" 2>/dev/null)
+    if sudo test -f "$ISO_PATH_ROOT/$target_filename"; then
+        FILE_SIZE=$(sudo stat -c%s "$ISO_PATH_ROOT/$target_filename" 2>/dev/null || sudo stat -f%z "$ISO_PATH_ROOT/$target_filename" 2>/dev/null)
         if [ "$FILE_SIZE" -lt 4000000000 ]; then
             warn "Warning: Downloaded file seems small ($FILE_SIZE bytes)"
             read -p "Continue anyway? (y/n): " -n 1 -r
@@ -218,9 +232,9 @@ download_virtio_iso() {
     # (e.g. virtio-win-0.1.302.iso); resolve it first so we save the ISO
     # under its real name instead of the generic redirect URL.
     local resolved_url
-    resolved_url=$(curl -sIL -o /dev/null -w '%{url_effective}' "$VIRTIO_STABLE_URL")
+    resolved_url=$(sudo curl -sIL -o /dev/null -w '%{url_effective}' "$VIRTIO_STABLE_URL")
     local target_filename
-    target_filename=$(basename "$resolved_url" 2>/dev/null)
+    target_filename=$(sudo basename "$resolved_url" 2>/dev/null)
     if [ -z "$target_filename" ] || [[ "$target_filename" != *.iso ]]; then
         error "Error: Could not resolve a versioned filename for the VirtIO ISO."
         return 1
@@ -230,20 +244,20 @@ download_virtio_iso() {
     info "Downloading to: $ISO_PATH_ROOT/$target_filename"
 
     if command -v wget &> /dev/null; then
-        wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
+        sudo wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
             "$VIRTIO_STABLE_URL" || {
             error "Error: VirtIO download failed."
             return 1
         }
     else
-        curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
+        sudo curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
             "$VIRTIO_STABLE_URL" || {
             error "Error: VirtIO download failed."
             return 1
         }
     fi
 
-    if [ ! -f "$ISO_PATH_ROOT/$target_filename" ]; then
+    if ! sudo test -f "$ISO_PATH_ROOT/$target_filename"; then
         error "Error: VirtIO ISO not found after download."
         return 1
     fi
@@ -256,18 +270,18 @@ download_virtio_iso() {
 # --- Checks ---
 
 # Check if VM ID exists
-if qm status "$VMID" &>/dev/null; then
+if sudo qm status "$VMID" &>/dev/null; then
     error "Error: VM ID $VMID already exists"
     exit 1
 fi
 
 # Check if Storage IDs exist in Proxmox
-if ! pvesm status | grep -q "^$DISK_STORAGE"; then
+if ! sudo pvesm status | sudo grep -q "^$DISK_STORAGE"; then
     error "Error: Disk Storage '$DISK_STORAGE' not found"
     exit 1
 fi
 
-if ! pvesm status | grep -q "^$ISO_STORAGE_ID"; then
+if ! sudo pvesm status | sudo grep -q "^$ISO_STORAGE_ID"; then
     error "Error: ISO Storage '$ISO_STORAGE_ID' not found"
     exit 1
 fi
@@ -275,10 +289,10 @@ fi
 # Check for Windows 11 ISO
 info "Searching for Windows 11 ISO in $ISO_PATH_ROOT..."
 # Find any ISO starting with Win11
-FOUND_ISO=$(find "$ISO_PATH_ROOT" -maxdepth 1 -name "Win11*.iso" -type f | head -n 1)
+FOUND_ISO=$(sudo find "$ISO_PATH_ROOT" -maxdepth 1 -name "Win11*.iso" -type f | sudo head -n 1)
 
 if [ -n "$FOUND_ISO" ]; then
-    WIN_ISO=$(basename "$FOUND_ISO")
+    WIN_ISO=$(sudo basename "$FOUND_ISO")
     success "Found local ISO: $WIN_ISO"
     echo ""
     read -p "Use this ISO? (y/n): " -n 1 -r
@@ -303,10 +317,10 @@ fi
 
 # Check for VirtIO ISO (any version - pick the newest if more than one is present)
 info "Searching for VirtIO ISO in $ISO_PATH_ROOT..."
-FOUND_VIRTIO=$(find "$ISO_PATH_ROOT" -maxdepth 1 -iname "virtio-win*.iso" -type f | sort -V | tail -n 1)
+FOUND_VIRTIO=$(sudo find "$ISO_PATH_ROOT" -maxdepth 1 -iname "virtio-win*.iso" -type f | sudo sort -V | sudo tail -n 1)
 
 if [ -n "$FOUND_VIRTIO" ]; then
-    VIRTIO_ISO=$(basename "$FOUND_VIRTIO")
+    VIRTIO_ISO=$(sudo basename "$FOUND_VIRTIO")
     success "Found local VirtIO ISO: $VIRTIO_ISO"
 else
     if ! download_virtio_iso; then
@@ -336,16 +350,16 @@ fi
 # --- ISO Generation ---
 
 info "Generating Unattended ISO from $ANSWER_FILE..."
-TMP_ISO_DIR=$(mktemp -d)
-cp "$ANSWER_FILE" "$TMP_ISO_DIR/"
+TMP_ISO_DIR=$(sudo mktemp -d)
+sudo cp "$ANSWER_FILE" "$TMP_ISO_DIR/"
 
 # Inject Password into the XML
 # We use a delimiter other than / in case the password contains it
-sed -i "s|PASSWORD_PLACEHOLDER|$ADMIN_PASSWORD|g" "$TMP_ISO_DIR/$ANSWER_FILE"
+sudo sed -i "s|PASSWORD_PLACEHOLDER|$ADMIN_PASSWORD|g" "$TMP_ISO_DIR/$ANSWER_FILE"
 
 # -V "OEMDRV" is important for some Windows versions to detect it automatically
-genisoimage -o "$ISO_PATH_ROOT/$OEM_ISO" -J -R -V "OEMDRV" "$TMP_ISO_DIR"
-rm -rf "$TMP_ISO_DIR"
+sudo genisoimage -o "$ISO_PATH_ROOT/$OEM_ISO" -J -R -V "OEMDRV" "$TMP_ISO_DIR"
+sudo rm -rf "$TMP_ISO_DIR"
 
 # --- VM Creation ---
 
@@ -353,7 +367,7 @@ info "Creating VM $VMID ($VM_NAME)..."
 
 # 1. Create the base VM with Memory, CPU, Network, and OS Type
 # We use virtio-scsi-pci for the controller to allow for better disk features
-qm create "$VMID" \
+sudo qm create "$VMID" \
   --name "$VM_NAME" \
   --memory "$VM_MEMORY" \
   --cores "$VM_CORES" \
@@ -369,13 +383,13 @@ VM_CREATED=1
 # 2. Add the Main Disk (SCSI) with SSD emulation and Discard
 # This command automatically allocates the volume on the storage
 info "Allocating Main Disk..."
-qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on"
+sudo qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on"
 
 # 3. Add EFI Disk and TPM (Required for Win11)
 # We let Proxmox handle the allocation logic
 info "Configuring TPM and UEFI..."
-qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1"
-qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
+sudo qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1"
+sudo qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
 
 # 4. Attach ISOs
 # NOTE: these values are quoted as a single argument since WIN_ISO/VIRTIO_ISO
@@ -383,16 +397,16 @@ qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
 # downloaded via browser). Without quoting, bash word-splits on the space and
 # `qm set` fails with "400 too many arguments".
 info "Attaching ISOs..."
-qm set "$VMID" --ide2 "$ISO_STORAGE_ID:iso/$WIN_ISO,media=cdrom"
-qm set "$VMID" --ide3 "$ISO_STORAGE_ID:iso/$VIRTIO_ISO,media=cdrom"
+sudo qm set "$VMID" --ide2 "$ISO_STORAGE_ID:iso/$WIN_ISO,media=cdrom"
+sudo qm set "$VMID" --ide3 "$ISO_STORAGE_ID:iso/$VIRTIO_ISO,media=cdrom"
 # Attach the generated answer file ISO
-qm set "$VMID" --sata0 "$ISO_STORAGE_ID:iso/$OEM_ISO,media=cdrom"
+sudo qm set "$VMID" --sata0 "$ISO_STORAGE_ID:iso/$OEM_ISO,media=cdrom"
 
 # 5. Set Boot Order and Other Settings
 info "Finalizing Configuration..."
-qm set "$VMID" --boot order='ide2;ide3;sata0;scsi0'
-qm set "$VMID" --agent enabled=1,fstrim_cloned_disks=1
-qm set "$VMID" --tablet 1
+sudo qm set "$VMID" --boot order='ide2;ide3;sata0;scsi0'
+sudo qm set "$VMID" --agent enabled=1,fstrim_cloned_disks=1
+sudo qm set "$VMID" --tablet 1
 
 banner "================================================"
 success "VM $VMID created successfully!"
@@ -400,7 +414,7 @@ banner "================================================"
 echo "Windows ISO used: $WIN_ISO"
 echo ""
 echo "Next Steps:"
-echo "1. Start the VM: qm start $VMID"
+echo "1. Start the VM: sudo qm start $VMID"
 echo "2. Open Console to monitor installation progress"
 echo "3. The installation will proceed automatically (30-60 minutes)"
 echo "   - Windows setup: ~10 minutes"

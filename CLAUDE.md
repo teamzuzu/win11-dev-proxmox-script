@@ -65,6 +65,18 @@ Neither of these was catchable from this sandbox (no `qm`/`pvesm` available here
 - **`qm set`'s `storage:...` argument needs quoting.** `qm set $VMID --ide2 $ISO_STORAGE_ID:iso/$WIN_ISO,media=cdrom` (and the equivalent `--ide3`/`--sata0`/`--scsi0`/`--efidisk0`/`--tpmstate0` lines) were unquoted, so a `WIN_ISO`/`VIRTIO_ISO` filename containing a space (very plausible for a Windows ISO downloaded via browser) gets word-split by bash into multiple `qm` arguments, failing with `400 too many arguments`. Fixed by quoting the whole `"$STORAGE:...` string as one argument on every `qm set`/`qm create`/`qm status` call that takes a variable. If you add a new `qm` invocation, quote it too - don't assume filenames/names are space-free.
 - **Cleanup trap now also destroys a partially created VM.** Once `qm create` succeeds, `VM_CREATED=1` is set; `cleanup()` (the same `trap ... ERR` used for the OEM ISO) now also runs `qm destroy "$VMID" --purge 1` if `VM_CREATED=1`, so a later failure (e.g. the ISO-attach bug above) doesn't leave a half-built VM blocking retries with the same `-i` VMID. This only protects runs *after* this fix landed - a VM left over from an earlier failed run still needs a manual `qm destroy <vmid>`.
 
+## Runs as a non-root user via sudo (added 2026-09-13)
+
+Every external command that needs privilege - `qm`, `pvesm`, `genisoimage`, and any file operation that touches ISO storage (`wget`/`curl` downloads, `find`/`stat`/`basename`/`sort`/`tail`/`head` on `$ISO_PATH_ROOT`, `mktemp`/`cp`/`sed`/`rm` for the temp answer-file dir, `rm`/`qm destroy` in the cleanup trap) - is now prefixed with `sudo`, so the script can be run as a regular sudo-capable user instead of requiring `root`. A preflight block right after the color helpers checks `command -v sudo` and `sudo -v`, exiting with a clear message if either fails, rather than dying confusingly on the first privileged command.
+
+**Deliberately NOT sudo'd, because it would break the script:**
+- `command -v curl/wget/genisoimage/sudo` - `command` is a bash builtin, not a real binary; `sudo command -v x` fails with "command not found".
+- Bash builtins/keywords: `read`, `echo`, `printf`, `[[ ]]`/`[ ]`, `local`, `return`, `exit`, `trap`, the `if`/`while`/`case` control structures themselves.
+- This script's own functions (`info`/`success`/`warn`/`error`/`banner`/`validate_iso_filename`/`get_iso_path`/`download_windows_iso`/`download_virtio_iso`/`cleanup`) - sudo execs real binaries by name, it can't invoke a function defined in the calling shell.
+- `[ ! -f "$ANSWER_FILE" ]` - checks a file in the user's own working directory (the cloned repo), not on ISO storage, so no privilege is needed.
+
+If you add a new external command, sudo it if it touches `qm`/`pvesm`/ISO storage; if it's a plain read on something the invoking user already owns (like `$ANSWER_FILE`), don't. `[ -f ... ]`/`[ ! -f ... ]` checks on `$ISO_PATH_ROOT` paths were changed to `sudo test -f ...` (`test` is both a builtin and a real binary at `/usr/bin/test`, so this form works correctly under `sudo`) - do the same for any new existence checks on privileged paths.
+
 ## Other things to keep in mind when touching `win11.sh`
 
 - The admin password is passed as a plaintext CLI arg (`-p`) and written in plaintext into the generated `autounattend.xml` (`PlainText>true`), so it lands in shell history, `ps` output, and on the ISO storage as an unencrypted file. Treat this as a dev/lab-only tool, not something to point at production credentials. Not fixed — flagged for awareness only.

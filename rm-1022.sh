@@ -1,2 +1,2 @@
 #!/bin/bash -x 
-qm stop 1022 && qm destroy 1022 --purge 1
+sudo qm stop 1022 && sudo qm destroy 1022 --purge 1
