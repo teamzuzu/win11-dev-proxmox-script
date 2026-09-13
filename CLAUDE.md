@@ -56,5 +56,6 @@ Neither of these was catchable from this sandbox (no `qm`/`pvesm` available here
 ## Conventions
 
 - Bash, `#!/bin/bash`, matches the existing style in `win11.sh` (plain functions, `getopts` for flags, human-readable `echo` progress banners).
+- Colored output (added 2026-09-13): `info`/`success`/`warn`/`error`/`banner` helper functions near the top wrap `printf` with ANSI codes (cyan/green/yellow/red/bold-cyan respectively); `error` writes to stderr, the rest to stdout. Colors are looked up once into `C_*` variables guarded by `[ -t 1 ]`, so they're empty (no-op) when stdout isn't a terminal - don't bypass these helpers with raw `echo`/ANSI codes for new status output, and don't remove the `-t 1` guard.
 - Keep the flags table in `README.md` (`-i -n -m -c -p`) in sync with the `getopts` string in `win11.sh` if either changes.
 - Git remote is `teamzuzu/win11-dev-proxmox-script` on GitHub, default branch `main`. Commits so far are a mix of the original author (`Nicholas Fusaro`) and this user — commit as the actual person working, never attribute commits to Claude/an AI author.

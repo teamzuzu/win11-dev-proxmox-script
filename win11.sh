@@ -1,6 +1,26 @@
 #!/bin/bash
 set -e
 
+# --- Colors ---
+# Disabled automatically when stdout isn't a terminal (e.g. piped to a log
+# file), so redirected output doesn't fill up with raw escape codes.
+if [ -t 1 ]; then
+    C_RED='\033[0;31m'
+    C_GREEN='\033[0;32m'
+    C_YELLOW='\033[0;33m'
+    C_CYAN='\033[0;36m'
+    C_BOLD='\033[1m'
+    C_RESET='\033[0m'
+else
+    C_RED='' C_GREEN='' C_YELLOW='' C_CYAN='' C_BOLD='' C_RESET=''
+fi
+
+info()    { printf '%b%s%b\n' "$C_CYAN" "$*" "$C_RESET"; }
+success() { printf '%b%s%b\n' "$C_GREEN" "$*" "$C_RESET"; }
+warn()    { printf '%b%s%b\n' "$C_YELLOW" "$*" "$C_RESET"; }
+error()   { printf '%b%s%b\n' "$C_RED" "$*" "$C_RESET" >&2; }
+banner()  { printf '%b%s%b\n' "$C_BOLD$C_CYAN" "$*" "$C_RESET"; }
+
 # --- Default Configuration ---
 VMID="1022"
 VM_NAME="win11-ide"
@@ -18,7 +38,7 @@ while getopts "i:n:m:c:p:h" opt; do
     c) VM_CORES="$OPTARG" ;;
     p) ADMIN_PASSWORD="$OPTARG" ;;
     h) echo "Usage: $0 [-i VMID] [-n NAME] [-m MEMORY] [-c CORES] [-p PASSWORD]" ; exit 0 ;;
-    *) echo "Invalid option: -$OPTARG" >&2 ; exit 1 ;;
+    *) error "Invalid option: -$OPTARG" ; exit 1 ;;
   esac
 done
 
@@ -50,12 +70,12 @@ OS_TYPE="win11"
 validate_iso_filename() {
     local label="$1" filename="$2"
     if [[ "$filename" != *.iso ]]; then
-        echo "Error: $label filename '$filename' does not end in .iso - refusing to use it."
+        error "Error: $label filename '$filename' does not end in .iso - refusing to use it."
         return 1
     fi
     if [[ "$filename" == *[,\;=\"\']* ]]; then
-        echo "Error: $label filename '$filename' contains characters (, ; = \" ') that break Proxmox's volume syntax."
-        echo "This usually means a broken download saved raw header text into the filename - rename the file (keeping only the part up to and including .iso) and try again."
+        error "Error: $label filename '$filename' contains characters (, ; = \" ') that break Proxmox's volume syntax."
+        error "This usually means a broken download saved raw header text into the filename - rename the file (keeping only the part up to and including .iso) and try again."
         return 1
     fi
 }
@@ -81,8 +101,8 @@ get_iso_path() {
 # print a friendly error message below.)
 DUMMY_PATH=$(pvesm path "$ISO_STORAGE_ID:iso/dummy.iso" 2>/dev/null) || true
 if [ -z "$DUMMY_PATH" ]; then
-    echo "Error: Could not resolve path for storage '$ISO_STORAGE_ID'."
-    echo "Please check if the Storage ID exists and is active in Proxmox."
+    error "Error: Could not resolve path for storage '$ISO_STORAGE_ID'."
+    error "Please check if the Storage ID exists and is active in Proxmox."
     exit 1
 fi
 ISO_PATH_ROOT=$(dirname "$DUMMY_PATH")
@@ -94,11 +114,11 @@ ISO_PATH_ROOT=$(dirname "$DUMMY_PATH")
 VM_CREATED=0
 cleanup() {
     if [ -f "$ISO_PATH_ROOT/$OEM_ISO" ]; then
-        echo "Cleaning up generated ISO..."
+        warn "Cleaning up generated ISO..."
         rm -f "$ISO_PATH_ROOT/$OEM_ISO"
     fi
     if [ "$VM_CREATED" = "1" ]; then
-        echo "Cleaning up partially created VM $VMID..."
+        warn "Cleaning up partially created VM $VMID..."
         qm destroy "$VMID" --purge 1 2>/dev/null || true
     fi
 }
@@ -106,9 +126,9 @@ trap cleanup ERR
 
 # --- Download Windows ISO ---
 download_windows_iso() {
-    echo "================================================"
-    echo "Windows 11 ISO Setup"
-    echo "================================================"
+    banner "================================================"
+    banner "Windows 11 ISO Setup"
+    banner "================================================"
     echo "To download the latest Windows 11 ISO:"
     echo "1. Go to: https://www.microsoft.com/software-download/windows11"
     echo "2. Scroll to 'Download Windows 11 Disk Image (ISO) for x64 devices'"
@@ -120,16 +140,16 @@ download_windows_iso() {
     echo ""
 
     if [ -z "$DOWNLOAD_URL" ]; then
-        echo "Error: No URL provided."
+        error "Error: No URL provided."
         return 1
     fi
 
-    echo "Analyzing link..."
-    
+    info "Analyzing link..."
+
     # Try to extract filename from URL or headers
     # Default name if extraction fails
     local target_filename="Win11_English_x64.iso"
-    
+
     # Use curl to get the filename from headers if possible.
     # NOTE: servers commonly send an UNQUOTED `filename=...` followed by a
     # second `filename*=UTF-8''...` parameter (RFC 5987 extended value) on the
@@ -144,37 +164,37 @@ download_windows_iso() {
     fi
 
     echo "Target filename: $target_filename"
-    echo "Downloading to: $ISO_PATH_ROOT/$target_filename"
-    
+    info "Downloading to: $ISO_PATH_ROOT/$target_filename"
+
     if command -v wget &> /dev/null; then
         wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
             "$DOWNLOAD_URL" || {
-            echo "Error: Download failed."
+            error "Error: Download failed."
             return 1
         }
     elif command -v curl &> /dev/null; then
         curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
             "$DOWNLOAD_URL" || {
-            echo "Error: Download failed."
+            error "Error: Download failed."
             return 1
         }
     else
-        echo "Error: Neither wget nor curl found."
+        error "Error: Neither wget nor curl found."
         return 1
     fi
-    
+
     # Verify download
     if [ -f "$ISO_PATH_ROOT/$target_filename" ]; then
         FILE_SIZE=$(stat -c%s "$ISO_PATH_ROOT/$target_filename" 2>/dev/null || stat -f%z "$ISO_PATH_ROOT/$target_filename" 2>/dev/null)
         if [ "$FILE_SIZE" -lt 4000000000 ]; then
-            echo "Warning: Downloaded file seems small ($FILE_SIZE bytes)"
+            warn "Warning: Downloaded file seems small ($FILE_SIZE bytes)"
             read -p "Continue anyway? (y/n): " -n 1 -r
             echo
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                 return 1
             fi
         fi
-        echo "Download successful!"
+        success "Download successful!"
         WIN_ISO="$target_filename"
         return 0
     else
@@ -186,11 +206,11 @@ download_windows_iso() {
 # Unlike the Windows ISO, this one has a stable, unauthenticated redirect that
 # always points at the current stable release, so this can run unattended.
 download_virtio_iso() {
-    echo "No local VirtIO ISO found. Downloading latest stable release..."
+    info "No local VirtIO ISO found. Downloading latest stable release..."
     echo "Source: $VIRTIO_STABLE_URL"
 
     if ! command -v curl &> /dev/null; then
-        echo "Error: curl is required to resolve the VirtIO download filename."
+        error "Error: curl is required to resolve the VirtIO download filename."
         return 1
     fi
 
@@ -202,33 +222,33 @@ download_virtio_iso() {
     local target_filename
     target_filename=$(basename "$resolved_url" 2>/dev/null)
     if [ -z "$target_filename" ] || [[ "$target_filename" != *.iso ]]; then
-        echo "Error: Could not resolve a versioned filename for the VirtIO ISO."
+        error "Error: Could not resolve a versioned filename for the VirtIO ISO."
         return 1
     fi
 
     echo "Latest stable version: $target_filename"
-    echo "Downloading to: $ISO_PATH_ROOT/$target_filename"
+    info "Downloading to: $ISO_PATH_ROOT/$target_filename"
 
     if command -v wget &> /dev/null; then
         wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
             "$VIRTIO_STABLE_URL" || {
-            echo "Error: VirtIO download failed."
+            error "Error: VirtIO download failed."
             return 1
         }
     else
         curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
             "$VIRTIO_STABLE_URL" || {
-            echo "Error: VirtIO download failed."
+            error "Error: VirtIO download failed."
             return 1
         }
     fi
 
     if [ ! -f "$ISO_PATH_ROOT/$target_filename" ]; then
-        echo "Error: VirtIO ISO not found after download."
+        error "Error: VirtIO ISO not found after download."
         return 1
     fi
 
-    echo "Download successful!"
+    success "Download successful!"
     VIRTIO_ISO="$target_filename"
     return 0
 }
@@ -237,42 +257,42 @@ download_virtio_iso() {
 
 # Check if VM ID exists
 if qm status "$VMID" &>/dev/null; then
-    echo "Error: VM ID $VMID already exists"
+    error "Error: VM ID $VMID already exists"
     exit 1
 fi
 
 # Check if Storage IDs exist in Proxmox
 if ! pvesm status | grep -q "^$DISK_STORAGE"; then
-    echo "Error: Disk Storage '$DISK_STORAGE' not found"
+    error "Error: Disk Storage '$DISK_STORAGE' not found"
     exit 1
 fi
 
 if ! pvesm status | grep -q "^$ISO_STORAGE_ID"; then
-    echo "Error: ISO Storage '$ISO_STORAGE_ID' not found"
+    error "Error: ISO Storage '$ISO_STORAGE_ID' not found"
     exit 1
 fi
 
 # Check for Windows 11 ISO
-echo "Searching for Windows 11 ISO in $ISO_PATH_ROOT..."
+info "Searching for Windows 11 ISO in $ISO_PATH_ROOT..."
 # Find any ISO starting with Win11
 FOUND_ISO=$(find "$ISO_PATH_ROOT" -maxdepth 1 -name "Win11*.iso" -type f | head -n 1)
 
 if [ -n "$FOUND_ISO" ]; then
     WIN_ISO=$(basename "$FOUND_ISO")
-    echo "Found local ISO: $WIN_ISO"
+    success "Found local ISO: $WIN_ISO"
     echo ""
     read -p "Use this ISO? (y/n): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         if ! download_windows_iso; then
-            echo "Setup cancelled."
+            error "Setup cancelled."
             exit 1
         fi
     fi
 else
-    echo "No Windows 11 ISO found locally."
+    warn "No Windows 11 ISO found locally."
     if ! download_windows_iso; then
-        echo "Please download the ISO manually and place it in $ISO_PATH_ROOT"
+        error "Please download the ISO manually and place it in $ISO_PATH_ROOT"
         exit 1
     fi
 fi
@@ -282,16 +302,16 @@ if ! validate_iso_filename "Windows 11 ISO" "$WIN_ISO"; then
 fi
 
 # Check for VirtIO ISO (any version - pick the newest if more than one is present)
-echo "Searching for VirtIO ISO in $ISO_PATH_ROOT..."
+info "Searching for VirtIO ISO in $ISO_PATH_ROOT..."
 FOUND_VIRTIO=$(find "$ISO_PATH_ROOT" -maxdepth 1 -iname "virtio-win*.iso" -type f | sort -V | tail -n 1)
 
 if [ -n "$FOUND_VIRTIO" ]; then
     VIRTIO_ISO=$(basename "$FOUND_VIRTIO")
-    echo "Found local VirtIO ISO: $VIRTIO_ISO"
+    success "Found local VirtIO ISO: $VIRTIO_ISO"
 else
     if ! download_virtio_iso; then
-        echo "Error: VirtIO ISO not found and automatic download failed."
-        echo "Download manually from: https://github.com/virtio-win/virtio-win-pkg-scripts/blob/master/README.md"
+        error "Error: VirtIO ISO not found and automatic download failed."
+        error "Download manually from: https://github.com/virtio-win/virtio-win-pkg-scripts/blob/master/README.md"
         exit 1
     fi
 fi
@@ -302,20 +322,20 @@ fi
 
 # Check for local answer file
 if [ ! -f "$ANSWER_FILE" ]; then
-    echo "Error: '$ANSWER_FILE' not found in current directory."
-    echo "Please upload it to the same folder as this script."
+    error "Error: '$ANSWER_FILE' not found in current directory."
+    error "Please upload it to the same folder as this script."
     exit 1
 fi
 
 # Check for ISO generation tool
 if ! command -v genisoimage &> /dev/null; then
-    echo "Error: 'genisoimage' is not installed. Install it with: apt install genisoimage"
+    error "Error: 'genisoimage' is not installed. Install it with: apt install genisoimage"
     exit 1
 fi
 
 # --- ISO Generation ---
 
-echo "Generating Unattended ISO from $ANSWER_FILE..."
+info "Generating Unattended ISO from $ANSWER_FILE..."
 TMP_ISO_DIR=$(mktemp -d)
 cp "$ANSWER_FILE" "$TMP_ISO_DIR/"
 
@@ -329,7 +349,7 @@ rm -rf "$TMP_ISO_DIR"
 
 # --- VM Creation ---
 
-echo "Creating VM $VMID ($VM_NAME)..."
+info "Creating VM $VMID ($VM_NAME)..."
 
 # 1. Create the base VM with Memory, CPU, Network, and OS Type
 # We use virtio-scsi-pci for the controller to allow for better disk features
@@ -348,12 +368,12 @@ VM_CREATED=1
 
 # 2. Add the Main Disk (SCSI) with SSD emulation and Discard
 # This command automatically allocates the volume on the storage
-echo "Allocating Main Disk..."
+info "Allocating Main Disk..."
 qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on"
 
 # 3. Add EFI Disk and TPM (Required for Win11)
 # We let Proxmox handle the allocation logic
-echo "Configuring TPM and UEFI..."
+info "Configuring TPM and UEFI..."
 qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1"
 qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
 
@@ -362,21 +382,21 @@ qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
 # come from filenames on disk and may contain spaces (e.g. a Windows ISO
 # downloaded via browser). Without quoting, bash word-splits on the space and
 # `qm set` fails with "400 too many arguments".
-echo "Attaching ISOs..."
+info "Attaching ISOs..."
 qm set "$VMID" --ide2 "$ISO_STORAGE_ID:iso/$WIN_ISO,media=cdrom"
 qm set "$VMID" --ide3 "$ISO_STORAGE_ID:iso/$VIRTIO_ISO,media=cdrom"
 # Attach the generated answer file ISO
 qm set "$VMID" --sata0 "$ISO_STORAGE_ID:iso/$OEM_ISO,media=cdrom"
 
 # 5. Set Boot Order and Other Settings
-echo "Finalizing Configuration..."
+info "Finalizing Configuration..."
 qm set "$VMID" --boot order='ide2;ide3;sata0;scsi0'
 qm set "$VMID" --agent enabled=1,fstrim_cloned_disks=1
 qm set "$VMID" --tablet 1
 
-echo "================================================"
-echo "VM $VMID created successfully!"
-echo "================================================"
+banner "================================================"
+success "VM $VMID created successfully!"
+banner "================================================"
 echo "Windows ISO used: $WIN_ISO"
 echo ""
 echo "Next Steps:"
@@ -385,5 +405,4 @@ echo "2. Open Console to monitor installation progress"
 echo "3. The installation will proceed automatically (30-60 minutes)"
 echo "   - Windows setup: ~10 minutes"
 echo "   - Software installation (VS2022, VS Code, Git): ~20-30 minutes"
-echo "================================================"
-
+banner "================================================"
