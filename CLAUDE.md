@@ -6,7 +6,7 @@ Guidance for Claude Code when working in this repository.
 
 A small collection of files that automate building a Windows 11 development VM on Proxmox VE from the host shell:
 
-- **`win11.sh`** — the main script. Creates the VM (`qm create`/`qm set`), sources `download-isos.sh` to locate/download the Windows 11 and VirtIO ISOs, builds an unattended-answer-file ISO from `autounattend.xml` (via `genisoimage`), and attaches everything to the new VM.
+- **`win11.sh`** — the main script. Creates the VM (`qm create`/`qm set`), sources `download-isos.sh` to locate/download the Windows 11 and VirtIO ISOs, builds an unattended-answer-file ISO from `autounattend.xml` (via `genisoimage`), attaches everything to the new VM, then **starts the VM itself** and sends Enter via `qm sendkey` for ~90s to clear Windows Setup's boot prompt (see dedicated section below) — this is genuinely hands-off end to end, not just up to VM creation.
 - **`download-isos.sh`** (added 2026-09-13) — `validate_iso_filename()`, `download_windows_iso()`, `download_virtio_iso()`, and `VIRTIO_STABLE_URL`, extracted out of `win11.sh` at the user's request. `win11.sh` sources it (`source "$SCRIPT_DIR/download-isos.sh"`); it can also be run directly (`./download-isos.sh`) to pre-fetch both ISOs without creating a VM — see the dedicated section below for how the dual-mode (sourced vs standalone) design works.
 - **`autounattend.xml`** — Windows unattended-setup answer file. Creates a local `Admin` user, disables telemetry/consumer features/search suggestions, forces the network to Private and disables the firewall entirely, enables RDP and OpenSSH, and uses `FirstLogonCommands` to install Chocolatey, then Git, VS Code, and Visual Studio 2022 Professional.
 - **`README.md`** — user-facing usage docs.
@@ -14,6 +14,18 @@ A small collection of files that automate building a Windows 11 development VM o
 There used to be a separate `install.sh` wrapper and a file named `Proxmox script.sh`; both were removed/renamed to `win11.sh` in history. Don't reintroduce references to either filename.
 
 These scripts are meant to run **on the Proxmox host** (needs `qm`, `pvesm`, `genisoimage` on PATH) with `autounattend.xml` and `download-isos.sh` present in the same working directory as `win11.sh`. There is no test suite — it can't be meaningfully unit tested outside a real Proxmox host, so treat any change as needing careful manual/read-through review rather than `npm test`-style verification. `autounattend.xml` itself CAN be checked for well-formedness without a Proxmox host: `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` - always run this after editing it. `win11.sh`/`download-isos.sh` CAN be smoke-tested without a real Proxmox host by putting fake `sudo`/`qm`/`pvesm`/`genisoimage`/`curl`/`wget` shims earlier on `$PATH` that just echo their arguments and touch/write fake output files — this is how the extraction below was verified end-to-end (found-locally path, download path, and standalone mode) before committing.
+
+## Auto-start + clear the "Press any key" boot prompt (2026-09-13)
+
+The Windows install media's UEFI bootloader shows "Press any key to boot from CD or DVD..." and waits only a few seconds before falling through to the next boot device (`ide3`/`sata0`/`scsi0` in our boot order, none of which are bootable OS images at that point) - without a keypress this silently defeats full automation, since nobody's watching the console at exactly the right moment on a scripted deploy. The user asked directly whether this could be worked around.
+
+Two known approaches, and why the first was chosen:
+1. **`qm sendkey` (implemented)** - inject a virtual keypress into the VM's console via Proxmox's QMP-backed `qm sendkey <vmid> <key>`. No ISO modification, no risk of producing a subtly non-bootable image, works immediately from very early boot.
+2. **Patch the ISO** (not implemented) - replace `efi/boot/bootx64.efi` with `efi/boot/cdboot.efi` inside the Windows ISO (functionally identical except it skips the prompt) - a well-documented community technique, but requires re-mastering a hybrid El Torito/UEFI ISO correctly (`oscdimg`/`xorriso` with matching boot-catalog parameters), which is easy to get subtly wrong from a Linux host and would need re-doing whenever the Windows ISO changes. Not worth the added risk when option 1 is simpler and safer.
+
+Implementation: `win11.sh` now calls `sudo qm start "$VMID"` itself right after the boot-order/agent/tablet `qm set` calls (previously this was left as a manual "Next Steps" instruction - it no longer is), then loops `sudo qm sendkey "$VMID" ret` every 2 seconds for 45 iterations (~90s total) to comfortably cover OVMF POST + ISO boot time variance across different host hardware. Sending Enter after Setup has already moved past that screen is harmless - unattended Setup has no focused text/button control that would react to a stray keypress in a way that changes behavior. Verified end-to-end with the fake-binary-shim harness (see below); the mocked `qm sendkey`/`qm start` calls confirmed the loop count, ordering, and that `set -e` doesn't trip on it (`|| true` guards each iteration).
+
+If this loop ever needs lengthening/shortening, it's the `for _ in $(seq 1 45); do ... sleep 2; done` line right after `qm start` - keep the sleep interval and iteration count as one clearly-named pair, don't split the total duration across multiple magic numbers.
 
 ## VS2022 workload + toolchain retargeted for pgr2-recomp (2026-09-13)
 

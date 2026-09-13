@@ -2,19 +2,19 @@
 
 ![Proxmox + Windows 11 Automated Script](w11prox.png)
 
-This project automates the creation of a fully configured Windows 11 Development VM on Proxmox. It handles VM creation, unattended Windows installation, debloating, and the installation of essential development tools (VS2022, VS Code, Git, OpenSSH).
+This project automates the creation of a fully configured Windows 11 Development VM on Proxmox. It handles VM creation, unattended Windows installation, debloating, and the installation of essential development tools (VS2022, VS Code, Git, CMake, Python, OpenSSH, RDP).
 
 ## ✨ Features
 
-- **Fully Automated VM Creation**: One-command deployment from Proxmox shell
+- **Fully Automated VM Creation**: One-command deployment from Proxmox shell — the script starts the VM itself and clears Windows Setup's "Press any key to boot..." prompt for you (see Troubleshooting)
 - **Unattended Windows 11 Installation**: No manual intervention required
 - **VirtIO Drivers**: Automatically loads storage and network drivers during setup
-- **Debloated Windows**: Telemetry, bloatware, and search suggestions disabled
+- **Debloated Windows**: Telemetry, bloatware, search suggestions, Widgets, Start suggestion ads, and Game Bar/GameDVR all disabled
 - **Pre-installed Development Environment**:
-  - Visual Studio 2022 Professional with .NET Desktop workload
+  - Visual Studio 2022 Professional with the Desktop development with C++ workload
   - Visual Studio Code
-  - Git
-- **SSH Access Enabled**: OpenSSH server pre-configured and ready
+  - Git, CMake, Python (+ `capstone`)
+- **Remote Access Enabled**: OpenSSH and Remote Desktop both pre-configured and open (firewall is disabled — dev/lab use, see the security note below)
 - **Resource Optimized**: 16GB RAM and 6 CPU cores by default (customizable)
 
 ## 🚀 Quick Start
@@ -161,6 +161,9 @@ This is a first-logon session/`PATH` timing issue, not a broken package: Chocola
 - Verify the VirtIO ISO is correctly attached to the VM
 - The answer file checks drive letters `D:` through `H:` automatically (WinPE's CD-ROM drive letter assignment shifts depending on how many optical devices are attached)
 - If needed, manually browse to the VirtIO ISO's `vioscsi\w11\amd64` folder during Windows setup — not `viostor`, since the disk is attached via a VirtIO-SCSI controller
+
+### VM seems stuck at a black/blank console screen right after start
+`win11.sh` now starts the VM itself and sends Enter to the console repeatedly for ~90 seconds, to clear Windows Setup's "Press any key to boot from CD or DVD..." UEFI prompt (it only waits a few seconds for a keypress, then falls through to the next boot device — without this it can look like an indefinite hang to whoever isn't watching the console at exactly that moment). If you open the console and it's already past that prompt, this already worked — no action needed. If it's still sitting at that exact prompt after ~90 seconds, press a key manually once and check `qm status <vmid>`/the console for what's actually happening; that's no longer expected behavior.
 
 ## 📝 License
 

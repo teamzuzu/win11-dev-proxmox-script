@@ -218,15 +218,24 @@ sudo qm set "$VMID" --boot order='ide2;ide3;sata0;scsi0'
 sudo qm set "$VMID" --agent enabled=1,fstrim_cloned_disks=1
 sudo qm set "$VMID" --tablet 1
 
+# 6. Start the VM and clear the "Press any key to boot from CD or DVD..."
+# prompt by injecting Enter via qm sendkey for the boot window - see CLAUDE.md
+info "Starting VM $VMID..."
+sudo qm start "$VMID"
+info "Sending keypresses to clear the boot prompt (up to ~90s)..."
+for _ in $(seq 1 45); do
+    sudo qm sendkey "$VMID" ret 2>/dev/null || true
+    sleep 2
+done
+
 banner "================================================"
-success "VM $VMID created successfully!"
+success "VM $VMID created and started successfully!"
 banner "================================================"
 echo "Windows ISO used: $WIN_ISO"
 echo ""
 echo "Next Steps:"
-echo "1. Start the VM: sudo qm start $VMID"
-echo "2. Open Console to monitor installation progress"
-echo "3. The installation will proceed automatically (30-60 minutes)"
+echo "1. Open Console to monitor installation progress"
+echo "2. The installation will proceed automatically (30-60 minutes)"
 echo "   - Windows setup: ~10 minutes"
-echo "   - Software installation (VS2022, VS Code, Git): ~20-30 minutes"
+echo "   - Software installation (VS2022, VS Code, Git, CMake, Python): ~20-30 minutes"
 banner "================================================"
