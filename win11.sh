@@ -20,6 +20,19 @@ warn()    { printf '%b%s%b\n' "$C_YELLOW" "$*" "$C_RESET"; }
 error()   { printf '%b%s%b\n' "$C_RED" "$*" "$C_RESET" >&2; }
 banner()  { printf '%b%s%b\n' "$C_BOLD$C_CYAN" "$*" "$C_RESET"; }
 
+# Runs a command with both stdout and stderr captured (silent on success);
+# on failure, dumps the captured output before returning its exit code, so
+# set -e/the cleanup trap still fire and no diagnostic detail is lost (see CLAUDE.md)
+run_quiet() {
+    local output status
+    output=$("$@" 2>&1)
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "$output" >&2
+    fi
+    return $status
+}
+
 # --- sudo preflight ---
 if ! command -v sudo &> /dev/null; then
     error "Error: sudo is required (this script runs privileged commands via sudo) but isn't installed."
@@ -176,7 +189,7 @@ sudo cp "$ANSWER_FILE" "$TMP_ISO_DIR/"
 # Delimiter other than / in case the password contains one
 sudo sed -i "s|PASSWORD_PLACEHOLDER|$ADMIN_PASSWORD|g" "$TMP_ISO_DIR/$ANSWER_FILE"
 
-sudo genisoimage -o "$ISO_PATH_ROOT/$OEM_ISO" -J -R -V "OEMDRV" "$TMP_ISO_DIR" > /dev/null
+run_quiet sudo genisoimage -o "$ISO_PATH_ROOT/$OEM_ISO" -J -R -V "OEMDRV" "$TMP_ISO_DIR"
 sudo rm -rf "$TMP_ISO_DIR"
 success "Answer-file ISO generated."
 
@@ -199,18 +212,18 @@ sudo qm create "$VMID" \
 VM_CREATED=1
 
 # 2. Allocate the main disk
-# stdout redirected - lvcreate/qm print a lot of allocation chatter here that
-# isn't useful to a user; stderr (real errors) still reaches the terminal,
-# and set -e/the cleanup trap don't care about stdout either way.
+# run_quiet - lvcreate/qm print a lot of allocation chatter here that isn't
+# useful to a user; still surfaced in full if the command actually fails.
 info "Allocating Main Disk..."
-sudo qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on" > /dev/null
+run_quiet sudo qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on"
 success "Main disk allocated."
 
-# 3. EFI disk + TPM (required for Win11) - same stdout-noise reasoning as above
-# (efidisk0's OVMF varstore copy and tpmstate0's swtpm_setup are both chatty)
+# 3. EFI disk + TPM (required for Win11) - same run_quiet reasoning as above
+# (efidisk0's OVMF varstore copy and tpmstate0's swtpm_setup are both chatty,
+# and swtpm_setup's progress output goes to stderr, not stdout - see CLAUDE.md)
 info "Configuring TPM and UEFI..."
-sudo qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1" > /dev/null
-sudo qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0" > /dev/null
+run_quiet sudo qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1"
+run_quiet sudo qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
 success "EFI/TPM configured."
 
 # 4. Attach ISOs (quoted - WIN_ISO/VIRTIO_ISO filenames may contain spaces, see CLAUDE.md)
@@ -228,11 +241,14 @@ sudo qm set "$VMID" --tablet 1
 # 6. Start the VM and clear the "Press any key to boot from CD or DVD..."
 # prompt by injecting Enter via qm sendkey for the boot window - see CLAUDE.md
 info "Starting VM $VMID..."
-sudo qm start "$VMID"
-info "Sending keypresses to clear the boot prompt (up to ~90s)..."
-for _ in $(seq 1 45); do
+# run_quiet - this is where swtpm_setup actually manufactures the TPM state
+# (tpmstate0's size=0 placeholder is only provisioned on first start), so the
+# chatter shows up here, not at the earlier --tpmstate0 qm set call - see CLAUDE.md
+run_quiet sudo qm start "$VMID"
+info "Sending keypresses to clear the boot prompt (up to ~15s)..."
+for _ in $(seq 1 15); do
     sudo qm sendkey "$VMID" ret 2>/dev/null || true
-    sleep 2
+    sleep 1
 done
 
 banner "================================================"
