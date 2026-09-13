@@ -1,5 +1,7 @@
 # Proxmox Windows 11 IDE Automation
 
+![Proxmox + Windows 11 Automated Script](w11prox.png)
+
 This project automates the creation of a fully configured Windows 11 Development VM on Proxmox. It handles VM creation, unattended Windows installation, debloating, and the installation of essential development tools (VS2022, VS Code, Git, OpenSSH).
 
 ## ✨ Features
