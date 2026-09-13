@@ -27,7 +27,8 @@ DISK_STORAGE="local-lvm"      # Where the VM disk goes
 ISO_STORAGE_ID="local"        # The Proxmox Storage ID for ISOs (Default: local)
 
 # FILE NAMES
-VIRTIO_ISO="virtio-win-0.1.240.iso"
+VIRTIO_ISO="virtio-win-0.1.240.iso" # Fallback name only; overwritten by whatever is found/downloaded below
+VIRTIO_STABLE_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 OEM_ISO="win11-unattend-${VMID}.iso" # Generated ISO name
 ANSWER_FILE="autounattend.xml"
 
@@ -140,6 +141,57 @@ download_windows_iso() {
     fi
 }
 
+# --- Download VirtIO ISO ---
+# Unlike the Windows ISO, this one has a stable, unauthenticated redirect that
+# always points at the current stable release, so this can run unattended.
+download_virtio_iso() {
+    echo "No local VirtIO ISO found. Downloading latest stable release..."
+    echo "Source: $VIRTIO_STABLE_URL"
+
+    if ! command -v curl &> /dev/null; then
+        echo "Error: curl is required to resolve the VirtIO download filename."
+        return 1
+    fi
+
+    # The stable-virtio link 301s to a version-specific filename
+    # (e.g. virtio-win-0.1.302.iso); resolve it first so we save the ISO
+    # under its real name instead of the generic redirect URL.
+    local resolved_url
+    resolved_url=$(curl -sIL -o /dev/null -w '%{url_effective}' "$VIRTIO_STABLE_URL")
+    local target_filename
+    target_filename=$(basename "$resolved_url" 2>/dev/null)
+    if [ -z "$target_filename" ] || [[ "$target_filename" != *.iso ]]; then
+        echo "Error: Could not resolve a versioned filename for the VirtIO ISO."
+        return 1
+    fi
+
+    echo "Latest stable version: $target_filename"
+    echo "Downloading to: $ISO_PATH_ROOT/$target_filename"
+
+    if command -v wget &> /dev/null; then
+        wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
+            "$VIRTIO_STABLE_URL" || {
+            echo "Error: VirtIO download failed."
+            return 1
+        }
+    else
+        curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
+            "$VIRTIO_STABLE_URL" || {
+            echo "Error: VirtIO download failed."
+            return 1
+        }
+    fi
+
+    if [ ! -f "$ISO_PATH_ROOT/$target_filename" ]; then
+        echo "Error: VirtIO ISO not found after download."
+        return 1
+    fi
+
+    echo "Download successful!"
+    VIRTIO_ISO="$target_filename"
+    return 0
+}
+
 # --- Checks ---
 
 # Check if VM ID exists
@@ -184,10 +236,19 @@ else
     fi
 fi
 
-if [ ! -f "$ISO_PATH_ROOT/$VIRTIO_ISO" ]; then
-    echo "Error: VirtIO ISO not found at $ISO_PATH_ROOT/$VIRTIO_ISO"
-    echo "Download from: https://github.com/virtio-win/virtio-win-pkg-scripts/blob/master/README.md"
-    exit 1
+# Check for VirtIO ISO (any version - pick the newest if more than one is present)
+echo "Searching for VirtIO ISO in $ISO_PATH_ROOT..."
+FOUND_VIRTIO=$(find "$ISO_PATH_ROOT" -maxdepth 1 -iname "virtio-win*.iso" -type f | sort -V | tail -n 1)
+
+if [ -n "$FOUND_VIRTIO" ]; then
+    VIRTIO_ISO=$(basename "$FOUND_VIRTIO")
+    echo "Found local VirtIO ISO: $VIRTIO_ISO"
+else
+    if ! download_virtio_iso; then
+        echo "Error: VirtIO ISO not found and automatic download failed."
+        echo "Download manually from: https://github.com/virtio-win/virtio-win-pkg-scripts/blob/master/README.md"
+        exit 1
+    fi
 fi
 
 # Check for local answer file

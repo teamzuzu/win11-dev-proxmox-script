@@ -50,10 +50,10 @@ Open `win11.sh` to edit these variables if your Proxmox environment differs from
 
 *   **`DISK_STORAGE`**: Storage ID for the VM disk (Default: `local-lvm`).
 *   **`ISO_STORAGE_ID`**: Storage ID for ISOs (Default: `local`).
-*   **`VIRTIO_ISO`**: Filename of your VirtIO drivers ISO (Default: `virtio-win-0.1.240.iso`).
+*   **`VIRTIO_STABLE_URL`**: Direct-download URL used to auto-fetch the VirtIO ISO if none is found (Default: Fedora's `stable-virtio` redirect).
 *   **`DISK_SIZE`**: Size of the main OS disk (Default: `130G`).
 
-The Windows ISO is **not** a fixed variable — the script searches your ISO storage for any file matching `Win11*.iso` and offers to use it, or offers to download one interactively if none is found.
+Neither `VIRTIO_ISO` nor the Windows ISO filename is a fixed setting you need to maintain — the script searches your ISO storage for any matching file and downloads one automatically if none is found (see below).
 
 ### Unattended Installation (`autounattend.xml`)
 The answer file handles the Windows setup. Key configurations include:
@@ -80,9 +80,8 @@ You must upload these ISOs to your Proxmox ISO storage (`ISO_STORAGE_ID`, defaul
 - **Manual Upload:** Alternatively, download it yourself and upload to Proxmox under `ISO_STORAGE_ID`. Any filename starting with `Win11` is picked up automatically.
 
 **VirtIO Drivers ISO:**
-- Download from [Fedora Project](https://github.com/virtio-win/virtio-win-pkg-scripts/blob/master/README.md)
-- Latest stable release: [virtio-win-0.1.240.iso](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso)
-- Filename must match the `VIRTIO_ISO` variable in the script: `virtio-win-0.1.240.iso`
+- **Auto-Download:** If no `virtio-win*.iso` file is found on the storage, the script downloads the current stable release automatically from the [Fedora Project's stable-virtio redirect](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso) — no manual step needed.
+- **Manual Upload:** You can still upload your own version ahead of time; any filename starting with `virtio-win` (case-insensitive) is picked up, and if more than one is present the newest version (by filename) is used.
 
 ### 3. Tools
 The script requires `genisoimage` to generate the answer file ISO:
