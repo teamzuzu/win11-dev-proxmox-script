@@ -3,12 +3,12 @@
     <settings pass="windowsPE">
         <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <SetupUILanguage>
-                <UILanguage>en-US</UILanguage>
+                <UILanguage>en-GB</UILanguage>
             </SetupUILanguage>
-            <InputLocale>en-US</InputLocale>
-            <SystemLocale>en-US</SystemLocale>
-            <UILanguage>en-US</UILanguage>
-            <UserLocale>en-US</UserLocale>
+            <InputLocale>en-GB</InputLocale>
+            <SystemLocale>en-GB</SystemLocale>
+            <UILanguage>en-GB</UILanguage>
+            <UserLocale>en-GB</UserLocale>
         </component>
         <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <DiskConfiguration>
@@ -131,6 +131,21 @@
     <settings pass="specialize">
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <ComputerName>*</ComputerName> </component>
+        <!--
+            This is a DIFFERENT component from Microsoft-Windows-International-Core-WinPE
+            above - that one only sets the language/locale for Windows Setup's own UI
+            during install. This one sets the locale for the INSTALLED OS. Without it,
+            OOBE has no indication the region/language question has already been
+            answered, so it prompts for it on first boot even though Setup itself
+            wasn't prompted (this is what a UK user hitting an interactive language
+            picker after a fully-unattended install turned out to be).
+        -->
+        <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <InputLocale>en-GB</InputLocale>
+            <SystemLocale>en-GB</SystemLocale>
+            <UILanguage>en-GB</UILanguage>
+            <UserLocale>en-GB</UserLocale>
+        </component>
         <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <RunSynchronous>
                 <RunSynchronousCommand wcm:action="add">

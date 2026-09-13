@@ -59,6 +59,7 @@ Neither `VIRTIO_ISO` nor the Windows ISO filename is a fixed setting you need to
 The answer file handles the Windows setup. Key configurations include:
 
 *   **User**: Creates a local user named `Admin`.
+*   **Language/Region**: Defaults to `en-GB` (English - United Kingdom), set in two places — `Microsoft-Windows-International-Core-WinPE` (Setup's own UI) and `Microsoft-Windows-International-Core` (the installed OS's region/keyboard, which is what actually suppresses OOBE's language-selection prompt on first boot). To use a different locale, change all `en-GB` occurrences in both components to your BCP-47 tag (e.g. `en-US`, `en-AU`).
 *   **Debloat**: Automatically disables Telemetry, "Consumer Features" (Candy Crush, etc.), and Search Suggestions.
 *   **Software**: Automatically installs the following via Chocolatey:
     *   Git

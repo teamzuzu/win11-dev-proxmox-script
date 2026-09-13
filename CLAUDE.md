@@ -31,6 +31,10 @@ If a boot loop or missing-driver problem still recurs after all three fixes, the
 
 **General lesson for this file:** don't trust unattend.xml driver/path assumptions from memory or convention - when in doubt, actually fetch and inspect the real ISO (`isoinfo -R -i <file> -l`) rather than guessing folder names or driver families, and cross-check the driver family against exactly which Proxmox bus/controller `win11.sh` attaches the disk with.
 
+## Language/region defaults to en-GB (2026-09-13)
+
+A UK-based user got prompted to pick a language during first boot despite the fully-unattended install otherwise working. Root cause: `Microsoft-Windows-International-Core-WinPE` (in the `windowsPE` pass) only controls the language/locale of **Setup's own UI** during install - it says nothing about the locale of the **installed OS**. That's a separate component, `Microsoft-Windows-International-Core` (no `-WinPE` suffix), which the file never had at all. Without it, OOBE has no indication the region question is already answered, so it asks on first boot even though Setup itself ran fully unattended. Added that component to the `specialize` pass with `en-GB`, and changed the existing WinPE-pass locale fields from `en-US` to `en-GB` too for consistency. If a user in another region hits this, all `en-GB` occurrences in *both* components need changing together - don't just edit one and assume it covers both Setup's UI and the installed OS.
+
 ## Fixed 2026-09-13 — `ISO_PATH_ROOT` undefined, no error handling, CRLF line endings
 
 Commit `457da5c` ("Refactor Proxmox script for clarity and updates") had deleted the block that dynamically resolved `ISO_PATH_ROOT` via `pvesm path "$ISO_STORAGE_ID:iso/dummy"` and the accompanying `ERR` cleanup trap, while `win11.sh` still referenced `$ISO_PATH_ROOT` in several places (ISO search, download destination, VirtIO ISO check). With the variable always empty, `download_windows_iso` would write multi-GB downloads to `/` (the host filesystem root, since this runs as root) instead of Proxmox ISO storage, and the VirtIO/local-ISO checks would never find anything real.
