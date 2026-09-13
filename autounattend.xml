@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
     <settings pass="windowsPE">
         <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <SetupUILanguage>
@@ -69,18 +69,48 @@
             </UserData>
         </component>
         <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <!--
+                WinPE assigns CD-ROM drive letters based on how many optical
+                devices are attached, so the VirtIO ISO isn't guaranteed to
+                land on E: or F: - with the Windows ISO, VirtIO ISO, and
+                OEMDRV answer-file ISO all attached (3 optical devices), it
+                can just as easily end up on D:, G:, or H:. Search a wider
+                range so driver injection doesn't silently fail to find
+                viostor/NetKVM, which leaves Windows Setup unable to see the
+                target disk during the automated DiskConfiguration step above
+                and crashes WinPE (observed as a reset before language
+                selection - see CLAUDE.md).
+            -->
             <DriverPaths>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="1">
-                    <Path>E:\viostor\w11\amd64</Path>
+                    <Path>D:\viostor\w11\amd64</Path>
                 </PathAndCredentials>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="2">
-                    <Path>F:\viostor\w11\amd64</Path>
+                    <Path>E:\viostor\w11\amd64</Path>
                 </PathAndCredentials>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="3">
-                    <Path>E:\NetKVM\w11\amd64</Path>
+                    <Path>F:\viostor\w11\amd64</Path>
                 </PathAndCredentials>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="4">
+                    <Path>G:\viostor\w11\amd64</Path>
+                </PathAndCredentials>
+                <PathAndCredentials wcm:action="add" wcm:keyValue="5">
+                    <Path>H:\viostor\w11\amd64</Path>
+                </PathAndCredentials>
+                <PathAndCredentials wcm:action="add" wcm:keyValue="6">
+                    <Path>D:\NetKVM\w11\amd64</Path>
+                </PathAndCredentials>
+                <PathAndCredentials wcm:action="add" wcm:keyValue="7">
+                    <Path>E:\NetKVM\w11\amd64</Path>
+                </PathAndCredentials>
+                <PathAndCredentials wcm:action="add" wcm:keyValue="8">
                     <Path>F:\NetKVM\w11\amd64</Path>
+                </PathAndCredentials>
+                <PathAndCredentials wcm:action="add" wcm:keyValue="9">
+                    <Path>G:\NetKVM\w11\amd64</Path>
+                </PathAndCredentials>
+                <PathAndCredentials wcm:action="add" wcm:keyValue="10">
+                    <Path>H:\NetKVM\w11\amd64</Path>
                 </PathAndCredentials>
             </DriverPaths>
         </component>

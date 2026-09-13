@@ -12,7 +12,18 @@ A small collection of files that automate building a Windows 11 development VM o
 
 There used to be a separate `install.sh` wrapper and a file named `Proxmox script.sh`; both were removed/renamed to `win11.sh` in history. Don't reintroduce references to either filename.
 
-This script is meant to run **on the Proxmox host** (needs `qm`, `pvesm`, `genisoimage` on PATH) with `autounattend.xml` present in the same working directory. There is no test suite — it can't be meaningfully unit tested outside a real Proxmox host, so treat any change as needing careful manual/read-through review rather than `npm test`-style verification.
+This script is meant to run **on the Proxmox host** (needs `qm`, `pvesm`, `genisoimage` on PATH) with `autounattend.xml` present in the same working directory. There is no test suite — it can't be meaningfully unit tested outside a real Proxmox host, so treat any change as needing careful manual/read-through review rather than `npm test`-style verification. `autounattend.xml` itself CAN be checked for well-formedness without a Proxmox host: `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` - always run this after editing it.
+
+## Boot loop investigation (2026-09-13) — autounattend.xml missing xmlns:wcm, fragile driver-path assumption
+
+Symptom: VM boots the Windows 11 ISO fine, reaches the initial Setup ("first blue screen"), then resets - before language selection - whenever the OEMDRV answer-file ISO (`sata0`) is attached. Removing `sata0` gets to the normal manual language-selection screen (expected - there's no unattend file to find/apply anymore, so it isn't really a fix, just confirms the crash happens *while trying to process the unattend file*).
+
+Two real bugs found and fixed, in order of suspected impact:
+
+1. **`autounattend.xml`'s root `<unattend>` element never declared `xmlns:wcm`.** Every `wcm:action`/`wcm:keyValue` attribute in the file (29 of them) referenced an undefined namespace prefix - `python3 -c "import xml.dom.minidom as m; m.parse(...)"` fails on this with `unbound prefix` even on the file as it existed before any of this session's edits, so this bug predates this repo's tracked history entirely. A real Windows System Image Manager-generated unattend.xml always declares `xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"` alongside the default namespace. Whether Windows Setup's own unattend-processing engine is strict enough about this to be the actual crash cause is unconfirmed (untestable outside a real install), but it's a genuine, structurally-wrong file that's cheap and safe to fix regardless, so it was fixed immediately. If a boot loop recurs after this fix, this namespace bug is ruled out as the cause.
+2. **`PnpCustomizationsWinPE`'s `DriverPaths` only checked `E:\` and `F:\`.** WinPE assigns CD-ROM drive letters based on how many optical devices are attached; with the Windows ISO + VirtIO ISO + OEMDRV all attached (3 optical devices), the VirtIO ISO isn't guaranteed to land on `E:` or `F:` - it could be `D:`, `G:`, or `H:`. If the viostor/NetKVM drivers aren't found, Windows Setup can't see the `scsi0` disk, and the automated `DiskConfiguration` step (`DiskID 0`, `WillWipeDisk`) has nothing to act on - a very plausible way to crash WinPE early. Widened the search to `D:` through `H:` for both driver dirs (10 `PathAndCredentials` entries total). Extra non-existent paths are silently skipped by Windows Setup, so this is purely additive/safe.
+
+If a boot loop still recurs after both fixes, the next diagnostic step (not yet tried) is pressing Shift+F10 at the "first blue screen" to get a WinPE command prompt before the reset happens, and checking `wpeutil`/drive letters/`X:\Windows\Panther\setupact.log` directly - this wasn't done because the reset happens quickly and nobody had confirmed there's a usable window to act in.
 
 ## Fixed 2026-09-13 — `ISO_PATH_ROOT` undefined, no error handling, CRLF line endings
 
