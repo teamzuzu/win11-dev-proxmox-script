@@ -51,7 +51,7 @@ Open `win11.sh` to edit these variables if your Proxmox environment differs from
 *   **`DISK_STORAGE`**: Storage ID for the VM disk (Default: `local-lvm`).
 *   **`ISO_STORAGE_ID`**: Storage ID for ISOs (Default: `local`).
 *   **`VIRTIO_STABLE_URL`**: Direct-download URL used to auto-fetch the VirtIO ISO if none is found (Default: Fedora's `stable-virtio` redirect).
-*   **`DISK_SIZE`**: Size of the main OS disk (Default: `130G`).
+*   **`DISK_SIZE`**: Size of the main OS disk in GiB, no unit suffix (Default: `130`).
 
 Neither `VIRTIO_ISO` nor the Windows ISO filename is a fixed setting you need to maintain — the script searches your ISO storage for any matching file and downloads one automatically if none is found (see below).
 
