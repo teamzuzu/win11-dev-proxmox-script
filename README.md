@@ -17,14 +17,18 @@ This project automates the creation of a fully configured Windows 11 Development
 
 ## 🚀 Quick Start
 
+`win11.sh` needs `autounattend.xml` next to it (it looks for the answer file in its current directory), so clone the repo on your Proxmox host rather than piping a single file into bash:
 
 ```bash
-bash -c "$(wget -qLO - https://raw.githubusercontent.com/npfusaro/win11-dev-proxmox-script/main/install.sh)" -- -i 3000 -n "Dev-VM" -p "SecurePass123"
+git clone https://github.com/teamzuzu/win11-dev-proxmox-script.git
+cd win11-dev-proxmox-script
+./win11.sh -i 3000 -n "Dev-VM" -p "SecurePass123"
 ```
+
 ## ⚙️ Configuration
 
 ### Command Line Arguments
-The `Proxmox script.sh` accepts the following flags to customize the deployment without editing files:
+`win11.sh` accepts the following flags to customize the deployment without editing files:
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -36,17 +40,20 @@ The `Proxmox script.sh` accepts the following flags to customize the deployment 
 
 **Example:**
 ```bash
-./Proxmox\ script.sh -i 4000 -n "Build-Server" -m 32768 -c 8 -p "MySecretPassword!"
+./win11.sh -i 4000 -n "Build-Server" -m 32768 -c 8 -p "MySecretPassword!"
 ```
 
+> ⚠️ The password is passed as a plain command-line argument, which means it can be visible in your shell history and to other users on the host via `ps`. Prefer a throwaway/non-sensitive password for a dev VM, and change it after first login if it matters.
+
 ### Script Variables (Advanced)
-Open `Proxmox script.sh` to edit these variables if your Proxmox environment differs from the defaults:
+Open `win11.sh` to edit these variables if your Proxmox environment differs from the defaults:
 
 *   **`DISK_STORAGE`**: Storage ID for the VM disk (Default: `local-lvm`).
-*   **`ISO_STORAGE_ID`**: Storage ID for ISOs (Default: `nfs`).
-*   **`ISO_PATH_ROOT`**: Filesystem path to your ISO storage (Default: `/mnt/pve/nfs/template/iso`).
-*   **`WIN_ISO`**: Filename of your Windows 11 ISO.
-*   **`VIRTIO_ISO`**: Filename of your VirtIO drivers ISO.
+*   **`ISO_STORAGE_ID`**: Storage ID for ISOs (Default: `local`).
+*   **`VIRTIO_ISO`**: Filename of your VirtIO drivers ISO (Default: `virtio-win-0.1.240.iso`).
+*   **`DISK_SIZE`**: Size of the main OS disk (Default: `130G`).
+
+The Windows ISO is **not** a fixed variable — the script searches your ISO storage for any file matching `Win11*.iso` and offers to use it, or offers to download one interactively if none is found.
 
 ### Unattended Installation (`autounattend.xml`)
 The answer file handles the Windows setup. Key configurations include:
@@ -65,25 +72,23 @@ The answer file handles the Windows setup. Key configurations include:
 Tested on Proxmox VE 8.x. Should work on 7.x as well.
 
 ### 2. Required ISOs
-You must upload these ISOs to your Proxmox ISO storage before running the script:
+You must upload these ISOs to your Proxmox ISO storage (`ISO_STORAGE_ID`, default `local`) before running the script:
 
 **Windows 11 ISO:**
-- **Auto-Download:** The script will ask for a download link if the ISO is missing.
+- **Auto-Download:** The script will ask for a download link if no `Win11*.iso` file is found on the storage.
 - **Get Link:** Go to [Microsoft](https://www.microsoft.com/software-download/windows11), select "Windows 11 (multi-edition ISO)", choose language, and copy the "64-bit Download" link.
-- **Manual Upload:** Alternatively, download it yourself and upload to Proxmox.
-- Filename in script: `Win11_23H2_x64v2_auto.iso` (or whatever the download provides)
+- **Manual Upload:** Alternatively, download it yourself and upload to Proxmox under `ISO_STORAGE_ID`. Any filename starting with `Win11` is picked up automatically.
 
 **VirtIO Drivers ISO:**
 - Download from [Fedora Project](https://github.com/virtio-win/virtio-win-pkg-scripts/blob/master/README.md)
 - Latest stable release: [virtio-win-0.1.240.iso](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso)
-- Filename in script: `virtio-win-0.1.240.iso`
+- Filename must match the `VIRTIO_ISO` variable in the script: `virtio-win-0.1.240.iso`
 
 ### 3. Tools
 The script requires `genisoimage` to generate the answer file ISO:
 ```bash
 apt install genisoimage
 ```
-*(The install.sh wrapper handles this automatically)*
 
 ## 🎯 Post-Installation
 
@@ -115,10 +120,7 @@ After the VM finishes installing (approximately 30-60 minutes depending on your 
 ## ⚠️ Troubleshooting
 
 ### "File not found" errors
-Ensure `ISO_PATH_ROOT` in the script matches the actual path on your Proxmox host where your ISO storage is mounted. Check with:
-```bash
-pvesm path nfs:iso/Win11_23H2_x64v2_auto.iso
-```
+Make sure the ISOs are present on the storage identified by `ISO_STORAGE_ID` (check with `pvesm status`), and that `autounattend.xml` sits in the same directory as `win11.sh` before you run it.
 
 ### Installation appears stalled
 The VS2022 installation is large (~10GB download). If the VM seems idle after first login:
@@ -142,4 +144,3 @@ This project is open source and available under the MIT License.
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome! Feel free to check the issues page or submit a pull request.
-
