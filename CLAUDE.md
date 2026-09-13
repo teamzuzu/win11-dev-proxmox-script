@@ -27,6 +27,14 @@ Implementation: `win11.sh` now calls `sudo qm start "$VMID"` itself right after 
 
 If this loop ever needs lengthening/shortening, it's the `for _ in $(seq 1 45); do ... sleep 2; done` line right after `qm start` - keep the sleep interval and iteration count as one clearly-named pair, don't split the total duration across multiple magic numbers.
 
+## Quieted noisy tool stdout (2026-09-13)
+
+`qm set --scsi0`/`--efidisk0`/`--tpmstate0` and `genisoimage` all print a lot of stdout chatter that isn't useful to a user (LVM `lvcreate`/`lvchange` messages, `swtpm_setup` TPM-manufacturing output, OVMF varstore-copy `INFO:` lines, ISO9660 build stats). Redirected stdout to `/dev/null` on those four calls, replacing it with a short `success "..."` line after each so the user still gets positive confirmation the step actually completed, rather than either raw tool spam or silence.
+
+**Only stdout is redirected, never stderr** - this was a deliberate choice, not an oversight: `set -e` and the `trap cleanup ERR` don't inspect a command's output at all, only its exit code, so redirecting stdout doesn't weaken error *detection* one bit - a failing `qm set`/`genisoimage` still stops the script and tears down the partial VM exactly as before. What's lost on a real failure is the *verbose diagnostic detail* those tools would have printed on stdout explaining why - a reasonable trade for a clean happy path, since Proxmox/Perl tooling conventionally sends the actual user-facing error to stderr (which still reaches the terminal) rather than stdout. If a future failure ever turns out to need that suppressed stdout detail to diagnose, that's the first thing to reconsider here - don't reflexively add more redirection to other commands without checking whether their errors also go to stderr.
+
+Verified with the fake-binary-shim harness: made the mocked `qm`/`genisoimage` shims print recognizable "NOISY:" lines on the calls being quieted, ran the full script, and confirmed zero such lines reached the output before committing.
+
 ## VS2022 workload + toolchain retargeted for pgr2-recomp (2026-09-13)
 
 The user is using this VM to build [teamzuzu/pgr2-recomp](https://github.com/teamzuzu/pgr2-recomp) (private repo, readable via `gh api repos/teamzuzu/pgr2-recomp/...` - `gh` was already authenticated with access in this session). Researched its actual requirements rather than guessing, by reading its `README.md`/`CLAUDE.md`/`CMakeLists.txt` directly and its toolkit dependency [sp00nznet/xboxrecomp](https://github.com/sp00nznet/xboxrecomp)'s `docs/GETTING_STARTED.md`. It's a pure C/CMake/MSVC project (static recompilation of an Xbox game to a native D3D11 Windows executable) - confirmed **no .NET/C# involvement anywhere**. xboxrecomp's own "What You Need" section states verbatim: "Visual Studio 2022 (MSVC compiler) with C/C++ desktop workload", "CMake 3.20+", "Python 3.10+ with capstone installed (pip install capstone)".

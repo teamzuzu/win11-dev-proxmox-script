@@ -176,8 +176,9 @@ sudo cp "$ANSWER_FILE" "$TMP_ISO_DIR/"
 # Delimiter other than / in case the password contains one
 sudo sed -i "s|PASSWORD_PLACEHOLDER|$ADMIN_PASSWORD|g" "$TMP_ISO_DIR/$ANSWER_FILE"
 
-sudo genisoimage -o "$ISO_PATH_ROOT/$OEM_ISO" -J -R -V "OEMDRV" "$TMP_ISO_DIR"
+sudo genisoimage -o "$ISO_PATH_ROOT/$OEM_ISO" -J -R -V "OEMDRV" "$TMP_ISO_DIR" > /dev/null
 sudo rm -rf "$TMP_ISO_DIR"
+success "Answer-file ISO generated."
 
 # --- VM Creation ---
 
@@ -198,13 +199,19 @@ sudo qm create "$VMID" \
 VM_CREATED=1
 
 # 2. Allocate the main disk
+# stdout redirected - lvcreate/qm print a lot of allocation chatter here that
+# isn't useful to a user; stderr (real errors) still reaches the terminal,
+# and set -e/the cleanup trap don't care about stdout either way.
 info "Allocating Main Disk..."
-sudo qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on"
+sudo qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on" > /dev/null
+success "Main disk allocated."
 
-# 3. EFI disk + TPM (required for Win11)
+# 3. EFI disk + TPM (required for Win11) - same stdout-noise reasoning as above
+# (efidisk0's OVMF varstore copy and tpmstate0's swtpm_setup are both chatty)
 info "Configuring TPM and UEFI..."
-sudo qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1"
-sudo qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
+sudo qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1" > /dev/null
+sudo qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0" > /dev/null
+success "EFI/TPM configured."
 
 # 4. Attach ISOs (quoted - WIN_ISO/VIRTIO_ISO filenames may contain spaces, see CLAUDE.md)
 info "Attaching ISOs..."
