@@ -127,6 +127,15 @@
                     <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
                     <Description>Bypass MSA Requirement</Description>
                 </RunSynchronousCommand>
+                <!-- Deprovision "new Outlook" before OOBE runs, not after - Windows Update
+                     Orchestrator has a dedicated OOBE-time task (UScheduler_Oobe\OutlookUpdate)
+                     that installs it from the Store during OOBE itself, which is the likely
+                     source of an unexpected region/market prompt during setup - see CLAUDE.md -->
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <Path>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-AppxProvisionedPackage -Online | Where-Object { $_.PackageName -like 'Microsoft.OutlookForWindows*' } | Remove-AppxProvisionedPackage -Online; Remove-Item -Path 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate' -Force -ErrorAction SilentlyContinue"</Path>
+                    <Description>Deprovision new Outlook for Windows</Description>
+                </RunSynchronousCommand>
             </RunSynchronous>
         </component>
     </settings>
@@ -319,6 +328,14 @@
                     <Order>24</Order>
                     <Description>Install WSL + latest Ubuntu</Description>
                     <CommandLine>wsl --install -d Ubuntu</CommandLine>
+                </SynchronousCommand>
+
+                <!-- Disable the pagefile entirely - dev VM, disk space over crash-dump
+                     capability, see CLAUDE.md -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>25</Order>
+                    <Description>Disable Pagefile</Description>
+                    <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$cs = Get-CimInstance Win32_ComputerSystem; $cs.AutomaticManagedPagefile = $false; Set-CimInstance -InputObject $cs; Get-CimInstance Win32_PageFileSetting | Remove-CimInstance -ErrorAction SilentlyContinue"</CommandLine>
                 </SynchronousCommand>
             </FirstLogonCommands>
         </component>

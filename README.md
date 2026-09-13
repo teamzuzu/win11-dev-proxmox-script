@@ -10,14 +10,15 @@ This project automates the creation of a fully configured Windows 11 Development
 - **Unattended Windows 11 Installation**: No manual intervention required
 - **VirtIO Drivers**: Automatically loads storage and network drivers during setup
 - **QEMU Guest Agent**: Installed from the VirtIO ISO at first logon, so Proxmox's guest-agent features (IP reporting, graceful shutdown, etc.) work out of the box
-- **Debloated Windows**: Telemetry, bloatware, search suggestions, Widgets, Start suggestion ads, and Game Bar/GameDVR all disabled
+- **Debloated Windows**: Telemetry, bloatware, search suggestions, Widgets, Start suggestion ads, Game Bar/GameDVR, and "new Outlook for Windows" all disabled/removed
 - **Pre-installed Development Environment**:
   - Visual Studio 2022 Professional with the Desktop development with C++ workload
   - Visual Studio Code
   - Git, CMake, Python (+ `capstone`)
   - WSL + the latest Ubuntu (staged automatically; needs one manual restart + first Ubuntu launch to finish — see the note below)
 - **Remote Access Enabled**: OpenSSH and Remote Desktop both pre-configured and open (firewall is disabled — dev/lab use, see the security note below)
-- **Resource Optimized**: 16GB RAM and 6 CPU cores by default (customizable)
+- **Resource Optimized**: 8GB RAM and 4 CPU cores by default (customizable), with the pagefile disabled entirely — see below
+- **No Pagefile**: Virtual memory/pagefile disabled at first logon, trading crash-dump capability for disk space on a VM that already gets RAM sized deliberately
 
 ## 🚀 Quick Start
 
@@ -36,10 +37,10 @@ cd win11-dev-proxmox-script
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-i` | **VM ID**: The unique ID for the new VM. | `1022` |
-| `-n` | **VM Name**: The name label for the VM. | `win11-ide` |
-| `-m` | **Memory (MB)**: RAM allocated to the VM. | `16384` (16GB) |
-| `-c` | **Cores**: Number of CPU cores allocated. | `6` |
+| `-i` | **VM ID**: The unique ID for the new VM. | `1111` |
+| `-n` | **VM Name**: The name label for the VM. | `win11-dev` |
+| `-m` | **Memory (MB)**: RAM allocated to the VM. | `8192` (8GB) |
+| `-c` | **Cores**: Number of CPU cores allocated. | `4` |
 | `-p` | **Password**: Local `Admin` user password. | `Password123!` |
 
 **Example:**
@@ -65,7 +66,7 @@ The answer file handles the Windows setup. Key configurations include:
 
 *   **User**: Creates a local user named `Admin`.
 *   **Language/Region**: Defaults to `en-GB` (English - United Kingdom), set in two places — `Microsoft-Windows-International-Core-WinPE` (Setup's own UI) and `Microsoft-Windows-International-Core` (the installed OS's region/keyboard, which is what actually suppresses OOBE's language-selection prompt on first boot). To use a different locale, change all `en-GB` occurrences in both components to your BCP-47 tag (e.g. `en-US`, `en-AU`).
-*   **Debloat**: Automatically disables Telemetry, "Consumer Features" (Candy Crush, etc.), Search Suggestions, Widgets, Start Menu/Settings suggestion ads, and Xbox Game Bar/GameDVR (the last one avoids the overlay hooking into D3D11 apps, relevant if you're building a game).
+*   **Debloat**: Automatically disables Telemetry, "Consumer Features" (Candy Crush, etc.), Search Suggestions, Widgets, Start Menu/Settings suggestion ads, and Xbox Game Bar/GameDVR (the last one avoids the overlay hooking into D3D11 apps, relevant if you're building a game). Also deprovisions "new Outlook for Windows" before OOBE even runs — Windows 11 otherwise installs it via a Store-driven task during OOBE itself, which is the likely cause if you've seen an unexpected region/market prompt during setup.
 *   **QEMU Guest Agent**: Installed silently from the VirtIO ISO's `guest-agent\qemu-ga-x64.msi` (the script searches all CD-ROM drive letters for it, since the VirtIO ISO's letter shifts depending on how many optical devices are attached — same reasoning as the storage-driver paths above).
 *   **Network**: Forces the network connection to the `Private` category (Windows' own `NetworkLocation` OOBE setting isn't always honored) and **disables Windows Firewall entirely, on all profiles**. This is a dev/lab-only default — see the security note below.
 *   **Remote Access**: Enables Remote Desktop (the `Admin` user can connect immediately, since it's a member of `Administrators`) and OpenSSH Server, both with their own firewall-allow rules kept as a fallback even though the firewall is off.
@@ -75,6 +76,7 @@ The answer file handles the Windows setup. Key configurations include:
     *   CMake, Python (with the `capstone` pip package)
     *   Visual Studio 2022 Professional with the **Desktop development with C++** workload (native/MSVC, not .NET) — swap `visualstudio2022-workload-nativedesktop` in `autounattend.xml` for a different [VS2022 workload ID](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-professional) if your project needs something else instead.
 *   **WSL**: `wsl --install -d Ubuntu` runs at first logon, which stages WSL and downloads the latest Ubuntu — but it can't finish unattended. It needs one manual restart (to enable the underlying Windows/Hyper-V features) followed by launching Ubuntu once from the Start menu, where you'll be prompted to create the Linux username/password interactively. **This also requires nested virtualization to be enabled on the Proxmox host itself** (`nested=1` for the `kvm_intel`/`kvm_amd` module) — without it, WSL2 will fail to actually start a Linux VM even though the install step succeeded. See the Troubleshooting section if Ubuntu won't launch after restarting.
+*   **Pagefile**: Disabled entirely at first logon (`AutomaticManagedPagefile` turned off, then any existing pagefile setting removed) — trades away Windows' ability to write a crash dump on a BSOD, in exchange for not burning disk space on virtual memory for what's meant to be a disposable dev VM.
 
 > ⚠️ **Security note:** this VM ships with the firewall fully disabled, RDP and SSH both open, and (by default) a well-known password. That's a reasonable default for an isolated home-lab network, but treat it accordingly — don't expose this VM directly to the internet, and change the password (`-p`) if the VM will be reachable by anyone else.
 
@@ -182,6 +184,9 @@ This is a first-logon session/`PATH` timing issue, not a broken package: Chocola
 
 ### WSL/Ubuntu won't launch after restarting ("virtual machine could not be started" or similar)
 This almost always means nested virtualization isn't enabled on the Proxmox host — see the Prerequisites section above. Confirm from inside the guest with `systeminfo` (look for "Virtualization Enabled In Firmware: Yes" and "A hypervisor has been detected") or `Get-ComputerInfo -Property HyperV*`. If that all looks fine and it still fails, run `wsl --install -d Ubuntu` manually from an elevated PowerShell prompt to see the actual error instead of the silent failure of an unattended first-logon command.
+
+### Unexpected region/country prompt during setup
+Windows 11 installs "new Outlook for Windows" via a Store-driven task that runs during OOBE itself, and that Store interaction can surface a region/market prompt that has nothing to do with the language/locale settings elsewhere in `autounattend.xml`. This is deprovisioned before OOBE runs (see `CLAUDE.md`), so a freshly generated answer-file ISO shouldn't hit this — if you're still seeing it, rebuild the OEM ISO (rerun `win11.sh`) rather than reusing one generated before this fix.
 
 ## 📝 License
 

@@ -100,6 +100,39 @@ Didn't add `--web-download` (an alternative `wsl --install` flag that fetches th
 
 Verified only via `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` (passes) and confirming the `<Order>` sequence is contiguous 1-24 with no gaps - the actual WSL/Ubuntu install behavior itself is untestable outside a real Windows 11 guest with nested virtualization actually working, same caveat as everything else in this file that depends on real Windows Setup/OOBE behavior.
 
+## Deprovisioned "new Outlook for Windows" - fixes an unexpected region prompt during install (2026-09-13)
+
+Live-testing turned up an unexpected region/country prompt appearing partway through an otherwise-unattended install, which the user suspected was Outlook-related. Researched rather than guessed (`WebSearch`/`WebFetch` against Microsoft's own ["Control Installing and Using New Outlook"](https://learn.microsoft.com/en-us/microsoft-365-apps/outlook/get-started/control-install) doc): Windows 11 builds later than 23H2 ship "new Outlook for Windows" (`Microsoft.OutlookForWindows`) preinstalled, and - the key detail - it's fetched via a **dedicated OOBE-time Windows Update Orchestrator scheduled task**, registered at `HKLM\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate`. That task pulls the app from the Microsoft Store *during OOBE itself*, before any `FirstLogonCommands` run - a Store-driven install/first-run flow triggering a region/market prompt mid-setup lines up exactly with what was observed, and with the user's own suspicion that it was Outlook-related.
+
+Fixed by adding `Order 2` to the **`specialize`-pass** `Microsoft-Windows-Deployment` `RunSynchronous` block (right after the existing `BypassNRO` registry command) - deliberately in `specialize`, not `FirstLogonCommands`, because `specialize` runs before OOBE even starts. Putting this fix in `FirstLogonCommands` instead (which only runs once, at the *first user's first logon*, i.e. after OOBE has already run to completion) would be too late - the OOBE-time task would already have fired and potentially already shown the prompt by the time `FirstLogonCommands` gets a chance to remove anything.
+
+The command:
+```
+Get-AppxProvisionedPackage -Online | Where-Object { $_.PackageName -like 'Microsoft.OutlookForWindows*' } | Remove-AppxProvisionedPackage -Online; Remove-Item -Path 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate' -Force -ErrorAction SilentlyContinue
+```
+- Uses `Get-AppxProvisionedPackage -Online | Where-Object {...} | Remove-AppxProvisionedPackage` (matching the pattern Microsoft's own doc uses for removing Mail/Calendar) rather than the doc's alternate one-liner `Remove-AppxProvisionedPackage ... -PackageName (Get-AppxPackage Microsoft.OutlookForWindows).PackageFullName` - `Get-AppxPackage` queries per-user AppX registration for the *current* user context, which doesn't reliably exist yet during `specialize` (no user profile has been created at that point); `Get-AppxProvisionedPackage -Online` queries the DISM image-provisioning store directly, which doesn't depend on any user context being live, so it's the more robust choice for a pre-OOBE pass.
+- The registry key removal is kept as a defensive extra even though Microsoft's doc says it's unnecessary "for any device that installed the March 2024 Non-Security Preview release (or later cumulative update) for Windows 11, version 23H2" - since this script can't know how recently-patched whatever Windows 11 ISO a user supplies is, removing a key that may already be gone is harmless (`-ErrorAction SilentlyContinue` swallows the not-found case cleanly).
+
+**Scope deliberately kept to just Outlook**, per the explicit ask ("I don't want Outlook installed") - the same Microsoft doc also covers removing the legacy Mail/Calendar apps (`microsoft.windowscommunicationsapps`, since new Outlook is meant to replace them) and blocking Store access entirely; neither was done here, consistent with this file's standing rule of not expanding scope beyond what's asked (see the AppX bloatware-removal note in the pgr2-recomp section above) - mention these as available follow-ups if the user wants them, don't add silently.
+
+Verified: `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` passes, and the PowerShell pipeline was dry-run tested with `pwsh` against mocked `Get-AppxProvisionedPackage`/`Remove-AppxProvisionedPackage` functions - confirmed it filters to only the Outlook package (a second unrelated mock package was left alone) and that the `Remove-Item` on a nonexistent registry path doesn't error/abort the pipeline. The actual OOBE-time behavior (whether this fully eliminates the region prompt) is unverifiable outside a real Windows 11 install, same caveat as everything else in this file that depends on live Setup/OOBE behavior - if the prompt still appears after this, the next diagnostic step is checking whether the ISO's build predates 23H2 (new Outlook preinstallation, and thus this whole failure mode, wouldn't apply to older builds - the prompt would have a different cause).
+
+## Pagefile disabled at first logon (2026-09-13)
+
+Added `Order 25` (new last entry) to `autounattend.xml`'s `FirstLogonCommands`, per explicit user request:
+```
+$cs = Get-CimInstance Win32_ComputerSystem; $cs.AutomaticManagedPagefile = $false; Set-CimInstance -InputObject $cs; Get-CimInstance Win32_PageFileSetting | Remove-CimInstance -ErrorAction SilentlyContinue
+```
+Turns off "automatically manage paging file size" and then deletes any existing pagefile setting, i.e. "No paging file" on every drive - the standard two-step needed since just clearing `Win32_PageFileSetting` while automatic management is still on lets Windows recreate one on next boot.
+
+**Used the CIM cmdlets (`Get-CimInstance`/`Set-CimInstance`/`Remove-CimInstance`) rather than `wmic`** - `wmic` (the classic `wmic computersystem set AutomaticManagedPagefile=False` / `wmic pagefileset delete` one-liners you'll see in older guides) is deprecated and removed by default in newer Windows 11 builds, so a `FirstLogonCommands` step depending on it would silently no-op or fail depending on exactly which build the user's Windows 11 ISO is. CIM cmdlets are the current, non-deprecated equivalent and match the `powershell -Command "..."` pattern already used everywhere else in this file.
+
+**Trade-off, not fixed further**: disabling the pagefile entirely means Windows can't write a memory dump on a crash (BSOD), which would otherwise be a first diagnostic step if something goes wrong. Reasonable for a disposable dev VM per the user's own request, but worth knowing if a future debugging session ever needs a crash dump and comes up empty - the pagefile being off here is why, not a missing/broken dump configuration.
+
+Didn't touch `VM_MEMORY`/`DISK_SIZE` or Proxmox's own swap - this is Windows' in-guest virtual memory only, unrelated to whatever swap configuration exists on the Proxmox host itself (out of scope, host-level).
+
+Verified: the PowerShell was dry-run tested with `pwsh` against mocked `Get-CimInstance`/`Set-CimInstance`/`Remove-CimInstance` cmdlets (using `[CmdletBinding()]` on the mocks so `-ErrorAction` binds as a common parameter the way it does on the real cmdlets) - confirmed it sets `AutomaticManagedPagefile = $false`, removes an existing pagefile setting object when one is returned, and doesn't error when the pipeline is empty. `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` passes, `<Order>` sequence is contiguous 1-25.
+
 ## Code comments vs. CLAUDE.md
 
 This repo has a standing split between the two, and it applies to `win11.sh`, `autounattend.xml`, and any file added later:
