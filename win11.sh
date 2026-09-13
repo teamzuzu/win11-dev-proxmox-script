@@ -46,11 +46,15 @@ get_iso_path() {
 }
 
 # Resolve the root ISO directory by asking for a dummy file
-# This is a bit of a hack, but reliable. We get the path for 'dummy', then dirname it.
+# This is a bit of a hack, but reliable. We get the path for 'dummy.iso', then dirname it.
+# NOTE: the probe filename must end in .iso (or .img) - Proxmox's volume-id
+# parser for content type "iso" rejects extension-less names like "dummy"
+# before it ever gets to building a path, which makes `pvesm path` fail even
+# though the storage itself is perfectly fine.
 # If the storage is not active or found, this might fail, so we check later.
 # (The "|| true" keeps a failed lookup from tripping `set -e` before we can
 # print a friendly error message below.)
-DUMMY_PATH=$(pvesm path "$ISO_STORAGE_ID:iso/dummy" 2>/dev/null) || true
+DUMMY_PATH=$(pvesm path "$ISO_STORAGE_ID:iso/dummy.iso" 2>/dev/null) || true
 if [ -z "$DUMMY_PATH" ]; then
     echo "Error: Could not resolve path for storage '$ISO_STORAGE_ID'."
     echo "Please check if the Storage ID exists and is active in Proxmox."
