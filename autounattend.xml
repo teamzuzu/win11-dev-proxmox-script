@@ -233,21 +233,21 @@
                     <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "if (!(Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 }"</CommandLine>
                 </SynchronousCommand>
 
-                <!-- App Installs -->
+                <!-- App Installs. Full path to choco.exe, NOT bare "choco" - see CLAUDE.md -->
                 <SynchronousCommand wcm:action="add">
                     <Order>12</Order>
                     <Description>Install Git</Description>
-                    <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "choco install git -y"</CommandLine>
+                    <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install git -y"</CommandLine>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
                     <Order>13</Order>
                     <Description>Install VS Code</Description>
-                    <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "choco install vscode -y"</CommandLine>
+                    <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install vscode -y"</CommandLine>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
                     <Order>14</Order>
                     <Description>Install Visual Studio 2022 Professional</Description>
-                    <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "choco install visualstudio2022professional --package-parameters '--add Microsoft.VisualStudio.Workload.NetDesktop --includeRecommended' -y"</CommandLine>
+                    <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install visualstudio2022professional --package-parameters '--add Microsoft.VisualStudio.Workload.NetDesktop --includeRecommended' -y"</CommandLine>
                 </SynchronousCommand>
             </FirstLogonCommands>
         </component>

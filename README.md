@@ -143,7 +143,10 @@ Make sure the ISOs are present on the storage identified by `ISO_STORAGE_ID` (ch
 The VS2022 installation is large (~10GB download). If the VM seems idle after first login:
 - Open Task Manager and check for `choco.exe` or `vs_installer.exe` processes
 - Allow 20-30 minutes for Visual Studio to complete
-- Check `C:\ProgramData\chocolatey\logs` for installation logs
+- Check `C:\ProgramData\chocolatey\logs` for installation logs (it's a hidden folder - `dir C:\ /a` if it's not showing up)
+
+### Chocolatey installed but Git/VS Code/VS2022 didn't
+This is a first-logon session/`PATH` timing issue, not a broken package: Chocolatey adds itself to the system `PATH` when it installs, but the `FirstLogonCommands` batch that installs it doesn't pick that change up for the *rest of that same batch* - so a bare `choco install ...` right after can silently fail to find `choco` at all, with nothing written to `chocolatey.log`. Already fixed here by calling Chocolatey via its full path (`C:\ProgramData\chocolatey\bin\choco.exe`) rather than bare `choco` - if you're hitting this on an older-generated answer-file ISO, rebuild it (rerun `win11.sh`).
 
 ### Network issues
 - The VM requires internet access on `vmbr0` during first login to download packages

@@ -75,6 +75,14 @@ After the first successful end-to-end install, the user found SSH unreachable un
 
 The pre-existing OpenSSH-specific firewall rule (`New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' ...`) was kept rather than removed, even though it's redundant with the firewall being fully disabled - if the user re-enables the firewall later without re-adding this rule, SSH would silently stop working again. Same reasoning for keeping the RDP firewall-rule-group-enable step. All `FirstLogonCommands` `<Order>` values were renumbered (now 1-14) to fit these in; keep them sequential with no gaps if you add more.
 
+## Bug found by live-testing: bare `choco` fails inside FirstLogonCommands (2026-09-13)
+
+Symptom: Chocolatey itself installed fine, but none of `git`/`vscode`/`visualstudio2022professional` did - and there was no trace of them at all in `C:\ProgramData\chocolatey\logs\chocolatey.log`, while manually running the *exact same* `choco install git -y` command in a fresh session worked immediately.
+
+Root cause: all `FirstLogonCommands` execute within one long-lived first-logon session. Chocolatey's installer (`Order 8`) appends `C:\ProgramData\chocolatey\bin` to the machine `PATH` via the registry, but that session's environment block was captured before the install ran, so every subsequent command in the same batch (`Order 12`-`14`, the `choco install ...` calls) resolves bare `choco` against a stale `PATH` and gets nothing - a silent `9009` ("command not found") with zero log trace, since `choco.exe` was never actually launched to log anything. Confirmed by the log being completely silent on `vscode` (not even a failed-attempt entry) combined with the manual command working fine in a new session.
+
+Fixed by calling Chocolatey via its full path, `C:\ProgramData\chocolatey\bin\choco.exe`, instead of bare `choco`, in all three app-install commands (`Order 12`-`14`) - this sidesteps `PATH` resolution entirely regardless of session/environment timing. Don't use `%ChocolateyInstall%` as an alternative fix - that environment variable has the exact same staleness problem as `PATH` within the same session, so it wouldn't actually fix anything. If you add more `choco install` commands to `FirstLogonCommands` later, use the same full path, not bare `choco`.
+
 ## Fixed 2026-09-13 — `ISO_PATH_ROOT` undefined, no error handling, CRLF line endings
 
 Commit `457da5c` ("Refactor Proxmox script for clarity and updates") had deleted the block that dynamically resolved `ISO_PATH_ROOT` via `pvesm path "$ISO_STORAGE_ID:iso/dummy"` and the accompanying `ERR` cleanup trap, while `win11.sh` still referenced `$ISO_PATH_ROOT` in several places (ISO search, download destination, VirtIO ISO check). With the variable always empty, `download_windows_iso` would write multi-GB downloads to `/` (the host filesystem root, since this runs as root) instead of Proxmox ISO storage, and the VirtIO/local-ISO checks would never find anything real.
