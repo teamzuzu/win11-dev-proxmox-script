@@ -8,7 +8,7 @@ A small collection of files that automate building a Windows 11 development VM o
 
 - **`win11.sh`** — the main script. Creates the VM (`qm create`/`qm set`), sources `download-isos.sh` to locate/download the Windows 11 and VirtIO ISOs, builds an unattended-answer-file ISO from `autounattend.xml` (via `genisoimage`), and attaches everything to the new VM.
 - **`download-isos.sh`** (added 2026-09-13) — `validate_iso_filename()`, `download_windows_iso()`, `download_virtio_iso()`, and `VIRTIO_STABLE_URL`, extracted out of `win11.sh` at the user's request. `win11.sh` sources it (`source "$SCRIPT_DIR/download-isos.sh"`); it can also be run directly (`./download-isos.sh`) to pre-fetch both ISOs without creating a VM — see the dedicated section below for how the dual-mode (sourced vs standalone) design works.
-- **`autounattend.xml`** — Windows unattended-setup answer file. Creates a local `Admin` user, disables telemetry/consumer features/search suggestions, and uses `FirstLogonCommands` to install Chocolatey, then Git, VS Code, and Visual Studio 2022 Professional, plus OpenSSH server.
+- **`autounattend.xml`** — Windows unattended-setup answer file. Creates a local `Admin` user, disables telemetry/consumer features/search suggestions, forces the network to Private and disables the firewall entirely, enables RDP and OpenSSH, and uses `FirstLogonCommands` to install Chocolatey, then Git, VS Code, and Visual Studio 2022 Professional.
 - **`README.md`** — user-facing usage docs.
 
 There used to be a separate `install.sh` wrapper and a file named `Proxmox script.sh`; both were removed/renamed to `win11.sh` in history. Don't reintroduce references to either filename.
@@ -64,6 +64,17 @@ If a boot loop or missing-driver problem still recurs after all three fixes, the
 
 A UK-based user got prompted to pick a language during first boot despite the fully-unattended install otherwise working. Root cause: `Microsoft-Windows-International-Core-WinPE` (in the `windowsPE` pass) only controls the language/locale of **Setup's own UI** during install - it says nothing about the locale of the **installed OS**. That's a separate component, `Microsoft-Windows-International-Core` (no `-WinPE` suffix), which the file never had at all. Without it, OOBE has no indication the region question is already answered, so it asks on first boot even though Setup itself ran fully unattended. Added that component to the `specialize` pass with `en-GB`, and changed the existing WinPE-pass locale fields from `en-US` to `en-GB` too for consistency. If a user in another region hits this, all `en-GB` occurrences in *both* components need changing together - don't just edit one and assume it covers both Setup's UI and the installed OS.
 
+## Network/firewall/remote-access defaults (2026-09-13)
+
+After the first successful end-to-end install, the user found SSH unreachable until manually switching the VM's network from Public to Private in Windows. Added to `FirstLogonCommands` (`autounattend.xml`), in this order, right after the debloat block and before Chocolatey:
+
+1. **`Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private`** - forces the network category directly. `<NetworkLocation>Home</NetworkLocation>` (in the `oobeSystem` pass's `OOBE` block) is supposed to answer this for OOBE, but evidently wasn't reliably taking effect - this is a known-flaky unattend.xml setting in virtualized environments, so don't rely on it alone; this command is the actual fix.
+2. **`Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False`** - disables Windows Firewall entirely, per explicit user request (not just "allow SSH/RDP" - full disable). This is a **dev/lab-only** default: combined with a default/known password and everything open, this VM should never be exposed directly to the internet. Flagged in the README's security note; don't soften or remove that note if this area is touched again.
+3. **`reg add ...Terminal Server /v fDenyTSConnections /d 0`** - enables Remote Desktop. No separate "add Admin to Remote Desktop Users" step is needed - `Admin` is already in `Administrators`, and Administrators can RDP once TS connections are allowed, without needing Remote Desktop Users group membership.
+4. **`Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'`** - enables the built-in RDP firewall rule group.
+
+The pre-existing OpenSSH-specific firewall rule (`New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' ...`) was kept rather than removed, even though it's redundant with the firewall being fully disabled - if the user re-enables the firewall later without re-adding this rule, SSH would silently stop working again. Same reasoning for keeping the RDP firewall-rule-group-enable step. All `FirstLogonCommands` `<Order>` values were renumbered (now 1-14) to fit these in; keep them sequential with no gaps if you add more.
+
 ## Fixed 2026-09-13 — `ISO_PATH_ROOT` undefined, no error handling, CRLF line endings
 
 Commit `457da5c` ("Refactor Proxmox script for clarity and updates") had deleted the block that dynamically resolved `ISO_PATH_ROOT` via `pvesm path "$ISO_STORAGE_ID:iso/dummy"` and the accompanying `ERR` cleanup trap, while `win11.sh` still referenced `$ISO_PATH_ROOT` in several places (ISO search, download destination, VirtIO ISO check). With the variable always empty, `download_windows_iso` would write multi-GB downloads to `/` (the host filesystem root, since this runs as root) instead of Proxmox ISO storage, and the VirtIO/local-ISO checks would never find anything real.
@@ -114,6 +125,7 @@ If you add a new external command, sudo it if it touches `qm`/`pvesm`/ISO storag
 
 - The admin password is passed as a plaintext CLI arg (`-p`) and written in plaintext into the generated `autounattend.xml` (`PlainText>true`), so it lands in shell history, `ps` output, and on the ISO storage as an unencrypted file. Treat this as a dev/lab-only tool, not something to point at production credentials. Not fixed — flagged for awareness only.
 - `autounattend.xml` sets `LogonCount>999` under `AutoLogon`, i.e. the VM auto-logs-in as `Admin` indefinitely across reboots. That's convenient for a throwaway dev VM but worth calling out if this is ever adapted for anything longer-lived.
+- The firewall is fully disabled and RDP+SSH are both open (see "Network/firewall/remote-access defaults" above) - combined with the plaintext/default password, this is a materially more exposed VM than a stock Windows install. Fine for an isolated home-lab network by explicit user request; don't quietly make this "more secure by default" without being asked, but also don't let new features widen the exposure further without flagging it.
 
 ## Conventions
 
