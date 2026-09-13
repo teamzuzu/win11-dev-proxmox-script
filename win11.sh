@@ -1,6 +1,19 @@
 #!/bin/bash
 set -e
 
+# --- Default Configuration ---
+VMID="1111"
+VM_NAME="win11-dev"
+VM_MEMORY="8192"       
+VM_CORES="4"
+ADMIN_PASSWORD="Password123!" # Default Password (Change this!)
+DISK_STORAGE="local-lvm"      # Where the VM disk goes
+ISO_STORAGE_ID="local"        # Storage ID for ISOs
+VIRTIO_ISO="virtio-win-0.1.240.iso" #
+OEM_ISO="win11-unattend-${VMID}.iso" # Generated ISO name
+ANSWER_FILE="autounattend.xml"
+DISK_SIZE="128" # GiB, no unit suffix required
+
 # --- Colors ---
 # Disabled automatically when stdout isn't a terminal 
 if [ -t 1 ]; then
@@ -43,12 +56,6 @@ if ! sudo -v; then
     exit 1
 fi
 
-# --- Default Configuration ---
-VMID="1022"
-VM_NAME="win11"
-VM_MEMORY="16384"       # 16GB 
-VM_CORES="6"            
-ADMIN_PASSWORD="Password123!" # Default Password (Change this!)
 
 while getopts "i:n:m:c:p:h" opt; do
   case $opt in
@@ -61,15 +68,6 @@ while getopts "i:n:m:c:p:h" opt; do
     *) error "Invalid option: -$OPTARG" ; exit 1 ;;
   esac
 done
-
-DISK_STORAGE="local-lvm"      # Where the VM disk goes
-ISO_STORAGE_ID="local"        # Storage ID for ISOs
-
-VIRTIO_ISO="virtio-win-0.1.240.iso" # Overwritten by search/download below
-OEM_ISO="win11-unattend-${VMID}.iso" # Generated ISO name
-ANSWER_FILE="autounattend.xml"
-
-DISK_SIZE="128" # GiB, no unit suffix required
 
 # ISO download functions (validate_iso_filename, download_windows_iso,
 # download_virtio_iso) live in download-isos.sh - see CLAUDE.md.
@@ -208,22 +206,19 @@ sudo qm create "$VMID" \
   --scsihw virtio-scsi-pci \
   --cpu host \
   --machine q35 \
+  --balloon 0 \
   --bios ovmf
 VM_CREATED=1
 
 # 2. Allocate the main disk
-# run_quiet - lvcreate/qm print a lot of allocation chatter here that isn't
-# useful to a user; still surfaced in full if the command actually fails.
 info "Allocating Main Disk..."
-run_quiet sudo qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on"
+sudo qm set "$VMID" --scsi0 "$DISK_STORAGE:$DISK_SIZE,ssd=1,discard=on,iothread=1"
 success "Main disk allocated."
 
-# 3. EFI disk + TPM (required for Win11) - same run_quiet reasoning as above
-# (efidisk0's OVMF varstore copy and tpmstate0's swtpm_setup are both chatty,
-# and swtpm_setup's progress output goes to stderr, not stdout - see CLAUDE.md)
+# 3. EFI disk + TPM 
 info "Configuring TPM and UEFI..."
-run_quiet sudo qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1"
-run_quiet sudo qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
+sudo qm set "$VMID" --efidisk0 "$DISK_STORAGE:0,efitype=4m,pre-enrolled-keys=1"
+sudo qm set "$VMID" --tpmstate0 "$DISK_STORAGE:0,version=v2.0"
 success "EFI/TPM configured."
 
 # 4. Attach ISOs (quoted - WIN_ISO/VIRTIO_ISO filenames may contain spaces, see CLAUDE.md)
@@ -241,9 +236,7 @@ sudo qm set "$VMID" --tablet 1
 # 6. Start the VM and clear the "Press any key to boot from CD or DVD..."
 # prompt by injecting Enter via qm sendkey for the boot window - see CLAUDE.md
 info "Starting VM $VMID..."
-# run_quiet - this is where swtpm_setup actually manufactures the TPM state
-# (tpmstate0's size=0 placeholder is only provisioned on first start), so the
-# chatter shows up here, not at the earlier --tpmstate0 qm set call - see CLAUDE.md
+# run_quiet - this is where swtpm_setup generates output
 run_quiet sudo qm start "$VMID"
 info "Sending keypresses to clear the boot prompt (up to ~15s)..."
 for _ in $(seq 1 15); do
@@ -251,14 +244,9 @@ for _ in $(seq 1 15); do
     sleep 1
 done
 
-banner "================================================"
 success "VM $VMID created and started successfully!"
-banner "================================================"
 echo "Windows ISO used: $WIN_ISO"
 echo ""
 echo "Next Steps:"
 echo "1. Open Console to monitor installation progress"
 echo "2. The installation will proceed automatically (30-60 minutes)"
-echo "   - Windows setup: ~10 minutes"
-echo "   - Software installation (VS2022, VS Code, Git, CMake, Python): ~20-30 minutes"
-banner "================================================"
