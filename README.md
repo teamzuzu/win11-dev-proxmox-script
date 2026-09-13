@@ -17,7 +17,7 @@ This project automates the creation of a fully configured Windows 11 Development
 
 ## 🚀 Quick Start
 
-`win11.sh` needs `autounattend.xml` next to it (it looks for the answer file in its current directory), so clone the repo on your Proxmox host rather than piping a single file into bash:
+`win11.sh` needs `autounattend.xml` and `download-isos.sh` next to it (it looks for both in its current directory), so clone the repo on your Proxmox host rather than piping a single file into bash:
 
 ```bash
 git clone https://github.com/teamzuzu/win11-dev-proxmox-script.git
@@ -50,8 +50,9 @@ Open `win11.sh` to edit these variables if your Proxmox environment differs from
 
 *   **`DISK_STORAGE`**: Storage ID for the VM disk (Default: `local-lvm`).
 *   **`ISO_STORAGE_ID`**: Storage ID for ISOs (Default: `local`).
-*   **`VIRTIO_STABLE_URL`**: Direct-download URL used to auto-fetch the VirtIO ISO if none is found (Default: Fedora's `stable-virtio` redirect).
 *   **`DISK_SIZE`**: Size of the main OS disk in GiB, no unit suffix (Default: `128`).
+
+`VIRTIO_STABLE_URL` (the VirtIO auto-download source) lives in `download-isos.sh`, not `win11.sh` — see below.
 
 Neither `VIRTIO_ISO` nor the Windows ISO filename is a fixed setting you need to maintain — the script searches your ISO storage for any matching file and downloads one automatically if none is found (see below).
 
@@ -93,6 +94,8 @@ You must upload these ISOs to your Proxmox ISO storage (`ISO_STORAGE_ID`, defaul
 - **Auto-Download:** If no `virtio-win*.iso` file is found on the storage, the script downloads the current stable release automatically from the [Fedora Project's stable-virtio redirect](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso) — no manual step needed.
 - **Manual Upload:** You can still upload your own version ahead of time; any filename starting with `virtio-win` (case-insensitive) is picked up, and if more than one is present the newest version (by filename) is used.
 
+Both ISOs' search/download logic lives in **`download-isos.sh`**, which `win11.sh` sources automatically. It can also be run on its own (`./download-isos.sh`) to pre-fetch both ISOs without creating a VM.
+
 ### 3. Tools
 The script requires `genisoimage` to generate the answer file ISO:
 ```bash
@@ -129,7 +132,7 @@ After the VM finishes installing (approximately 30-60 minutes depending on your 
 ## ⚠️ Troubleshooting
 
 ### "File not found" errors
-Make sure the ISOs are present on the storage identified by `ISO_STORAGE_ID` (check with `pvesm status`), and that `autounattend.xml` sits in the same directory as `win11.sh` before you run it.
+Make sure the ISOs are present on the storage identified by `ISO_STORAGE_ID` (check with `pvesm status`), and that `autounattend.xml` and `download-isos.sh` both sit in the same directory as `win11.sh` before you run it.
 
 ### Installation appears stalled
 The VS2022 installation is large (~10GB download). If the VM seems idle after first login:

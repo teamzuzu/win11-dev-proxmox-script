@@ -53,26 +53,15 @@ DISK_STORAGE="local-lvm"      # Where the VM disk goes
 ISO_STORAGE_ID="local"        # Storage ID for ISOs
 
 VIRTIO_ISO="virtio-win-0.1.240.iso" # Overwritten by search/download below
-VIRTIO_STABLE_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 OEM_ISO="win11-unattend-${VMID}.iso" # Generated ISO name
 ANSWER_FILE="autounattend.xml"
 
 DISK_SIZE="128" # GiB, no unit suffix required
 
-# --- Filename Validation ---
-# Rejects filenames that would break qm's volid syntax (see CLAUDE.md).
-validate_iso_filename() {
-    local label="$1" filename="$2"
-    if [[ "$filename" != *.iso ]]; then
-        error "Error: $label filename '$filename' does not end in .iso - refusing to use it."
-        return 1
-    fi
-    if [[ "$filename" == *[,\;=\"\']* ]]; then
-        error "Error: $label filename '$filename' contains characters (, ; = \" ') that break Proxmox's volume syntax."
-        error "This usually means a broken download saved raw header text into the filename - rename the file (keeping only the part up to and including .iso) and try again."
-        return 1
-    fi
-}
+# ISO download functions (validate_iso_filename, download_windows_iso,
+# download_virtio_iso) live in download-isos.sh - see CLAUDE.md.
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "$SCRIPT_DIR/download-isos.sh"
 
 # --- Dynamic Path Resolution ---
 get_iso_path() {
@@ -103,124 +92,6 @@ cleanup() {
     fi
 }
 trap cleanup ERR
-
-# --- Download Windows ISO ---
-download_windows_iso() {
-    banner "================================================"
-    banner "Windows 11 ISO Setup"
-    banner "================================================"
-    echo "To download the latest Windows 11 ISO:"
-    echo "1. Go to: https://www.microsoft.com/software-download/windows11"
-    echo "2. Scroll to 'Download Windows 11 Disk Image (ISO) for x64 devices'"
-    echo "3. Select 'Windows 11 (multi-edition ISO)' and click Download"
-    echo "4. Select your language and click Confirm"
-    echo "5. Right-click the '64-bit Download' button and Copy Link Address"
-    echo ""
-    read -p "Paste the download link here: " DOWNLOAD_URL
-    echo ""
-
-    if [ -z "$DOWNLOAD_URL" ]; then
-        error "Error: No URL provided."
-        return 1
-    fi
-
-    info "Analyzing link..."
-
-    # Fallback filename if header parsing below fails
-    local target_filename="Win11_English_x64.iso"
-
-    # Handles an unquoted filename= plus a trailing filename*= param (see CLAUDE.md)
-    if command -v curl &> /dev/null; then
-        local header_name=$(sudo curl -sI "$DOWNLOAD_URL" | sudo grep -i "content-disposition" | sudo sed -n 's/.*[Ff]ilename="\?\([^";]*\)"\?.*/\1/p' | sudo tr -d '\r')
-        if [ -n "$header_name" ]; then
-            target_filename="$header_name"
-        fi
-    fi
-
-    echo "Target filename: $target_filename"
-    info "Downloading to: $ISO_PATH_ROOT/$target_filename"
-
-    if command -v wget &> /dev/null; then
-        sudo wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
-            "$DOWNLOAD_URL" || {
-            error "Error: Download failed."
-            return 1
-        }
-    elif command -v curl &> /dev/null; then
-        sudo curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
-            "$DOWNLOAD_URL" || {
-            error "Error: Download failed."
-            return 1
-        }
-    else
-        error "Error: Neither wget nor curl found."
-        return 1
-    fi
-
-    if sudo test -f "$ISO_PATH_ROOT/$target_filename"; then
-        FILE_SIZE=$(sudo stat -c%s "$ISO_PATH_ROOT/$target_filename" 2>/dev/null || sudo stat -f%z "$ISO_PATH_ROOT/$target_filename" 2>/dev/null)
-        if [ "$FILE_SIZE" -lt 4000000000 ]; then
-            warn "Warning: Downloaded file seems small ($FILE_SIZE bytes)"
-            read -p "Continue anyway? (y/n): " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                return 1
-            fi
-        fi
-        success "Download successful!"
-        WIN_ISO="$target_filename"
-        return 0
-    else
-        return 1
-    fi
-}
-
-# --- Download VirtIO ISO ---
-download_virtio_iso() {
-    info "No local VirtIO ISO found. Downloading latest stable release..."
-    echo "Source: $VIRTIO_STABLE_URL"
-
-    if ! command -v curl &> /dev/null; then
-        error "Error: curl is required to resolve the VirtIO download filename."
-        return 1
-    fi
-
-    # Resolve the redirect to get the real versioned filename
-    local resolved_url
-    resolved_url=$(sudo curl -sIL -o /dev/null -w '%{url_effective}' "$VIRTIO_STABLE_URL")
-    local target_filename
-    target_filename=$(sudo basename "$resolved_url" 2>/dev/null)
-    if [ -z "$target_filename" ] || [[ "$target_filename" != *.iso ]]; then
-        error "Error: Could not resolve a versioned filename for the VirtIO ISO."
-        return 1
-    fi
-
-    echo "Latest stable version: $target_filename"
-    info "Downloading to: $ISO_PATH_ROOT/$target_filename"
-
-    if command -v wget &> /dev/null; then
-        sudo wget --progress=bar:force --show-progress -O "$ISO_PATH_ROOT/$target_filename" \
-            "$VIRTIO_STABLE_URL" || {
-            error "Error: VirtIO download failed."
-            return 1
-        }
-    else
-        sudo curl -L --progress-bar -o "$ISO_PATH_ROOT/$target_filename" \
-            "$VIRTIO_STABLE_URL" || {
-            error "Error: VirtIO download failed."
-            return 1
-        }
-    fi
-
-    if ! sudo test -f "$ISO_PATH_ROOT/$target_filename"; then
-        error "Error: VirtIO ISO not found after download."
-        return 1
-    fi
-
-    success "Download successful!"
-    VIRTIO_ISO="$target_filename"
-    return 0
-}
 
 # --- Checks ---
 
