@@ -76,26 +76,38 @@
                 OEMDRV answer-file ISO all attached (3 optical devices), it
                 can just as easily end up on D:, G:, or H:. Search a wider
                 range so driver injection doesn't silently fail to find
-                viostor/NetKVM, which leaves Windows Setup unable to see the
+                vioscsi/NetKVM, which leaves Windows Setup unable to see the
                 target disk during the automated DiskConfiguration step above
                 and crashes WinPE (observed as a reset before language
                 selection - see CLAUDE.md).
+
+                IMPORTANT: win11.sh attaches the main disk via the
+                scsihw=virtio-scsi-pci controller (scsi0 disk), i.e. a
+                VirtIO-SCSI controller - the matching Windows driver is
+                vioscsi, NOT viostor (viostor is for the older VirtIO-BLOCK
+                device type, a different PCI hardware ID; Windows Setup's
+                "Load Driver" hides drivers that don't match present
+                hardware by default, so viostor being present on the ISO
+                doesn't help here and silently looks like "no driver
+                found"). If win11.sh's disk attachment ever changes to a
+                virtio0 device instead of scsi0, switch this back to
+                viostor.
             -->
             <DriverPaths>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="1">
-                    <Path>D:\viostor\w11\amd64</Path>
+                    <Path>D:\vioscsi\w11\amd64</Path>
                 </PathAndCredentials>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="2">
-                    <Path>E:\viostor\w11\amd64</Path>
+                    <Path>E:\vioscsi\w11\amd64</Path>
                 </PathAndCredentials>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="3">
-                    <Path>F:\viostor\w11\amd64</Path>
+                    <Path>F:\vioscsi\w11\amd64</Path>
                 </PathAndCredentials>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="4">
-                    <Path>G:\viostor\w11\amd64</Path>
+                    <Path>G:\vioscsi\w11\amd64</Path>
                 </PathAndCredentials>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="5">
-                    <Path>H:\viostor\w11\amd64</Path>
+                    <Path>H:\vioscsi\w11\amd64</Path>
                 </PathAndCredentials>
                 <PathAndCredentials wcm:action="add" wcm:keyValue="6">
                     <Path>D:\NetKVM\w11\amd64</Path>
