@@ -14,6 +14,23 @@ There used to be a separate `install.sh` wrapper and a file named `Proxmox scrip
 
 This script is meant to run **on the Proxmox host** (needs `qm`, `pvesm`, `genisoimage` on PATH) with `autounattend.xml` present in the same working directory. There is no test suite — it can't be meaningfully unit tested outside a real Proxmox host, so treat any change as needing careful manual/read-through review rather than `npm test`-style verification. `autounattend.xml` itself CAN be checked for well-formedness without a Proxmox host: `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` - always run this after editing it.
 
+## Code comments vs. CLAUDE.md
+
+This repo has a standing split between the two, and it applies to `win11.sh`, `autounattend.xml`, and any file added later:
+
+**Goes in a code comment (short, factual, at the point of use):**
+- What a non-obvious line does, in present tense, in one line. Two lines only if the thing genuinely needs a second clause (e.g. a regex's edge case).
+- A pointer to more detail: `# ... (see CLAUDE.md)`.
+- Never a paragraph. If you're about to write a second sentence justifying *why* something is the way it is, stop — that belongs below instead.
+
+**Goes in CLAUDE.md (as much detail as the topic needs):**
+- The *why*: root cause of a bug, the investigation that found it, what was tried and ruled out, what the fix actually changed and what it didn't.
+- Anything that took more than a couple of minutes to figure out — if it was non-obvious to work out once, it'll be non-obvious to re-derive later.
+- Decisions deliberately NOT made (e.g. "Windows 11 ISO auto-download was deliberately NOT added" below) and the reasoning, so they aren't re-attempted or re-litigated from scratch.
+- Constraints on future edits to that area ("if you change X, Y must also change" / "don't do Z, it'll break because...").
+
+**In practice:** when you fix something, write the one-line factual comment in the code, then add or extend a dated `##` section here with the full story. When you're about to touch code that has a `(see CLAUDE.md)` pointer, actually read the referenced section first rather than re-deriving the reasoning from the code alone - it may cover a constraint or a rejected alternative that isn't visible from the diff.
+
 ## Boot loop investigation (2026-09-13) — autounattend.xml missing xmlns:wcm, fragile driver-path assumption
 
 Symptom: VM boots the Windows 11 ISO fine, reaches the initial Setup ("first blue screen"), then resets - before language selection - whenever the OEMDRV answer-file ISO (`sata0`) is attached. Removing `sata0` gets to the normal manual language-selection screen (expected - there's no unattend file to find/apply anymore, so it isn't really a fix, just confirms the crash happens *while trying to process the unattend file*).
@@ -92,4 +109,4 @@ If you add a new external command, sudo it if it touches `qm`/`pvesm`/ISO storag
 - Colored output (added 2026-09-13): `info`/`success`/`warn`/`error`/`banner` helper functions near the top wrap `printf` with ANSI codes (cyan/green/yellow/red/bold-cyan respectively); `error` writes to stderr, the rest to stdout. Colors are looked up once into `C_*` variables guarded by `[ -t 1 ]`, so they're empty (no-op) when stdout isn't a terminal - don't bypass these helpers with raw `echo`/ANSI codes for new status output, and don't remove the `-t 1` guard.
 - Keep the flags table in `README.md` (`-i -n -m -c -p`) in sync with the `getopts` string in `win11.sh` if either changes.
 - Git remote is `teamzuzu/win11-dev-proxmox-script` on GitHub, default branch `main`. Commits so far are a mix of the original author (`Nicholas Fusaro`) and this user — commit as the actual person working, never attribute commits to Claude/an AI author.
-- **Comments in `win11.sh`/`autounattend.xml` stay short and factual** (what/why in one line, not a paragraph) — the detailed rationale/history for a given fix belongs here in CLAUDE.md, not inline. If you're about to write more than one line explaining *why* something is the way it is, put the explanation here and leave a short pointer (`# ... (see CLAUDE.md)`) in the code instead.
+- Code comments vs. CLAUDE.md: see the dedicated section near the top of this file.
