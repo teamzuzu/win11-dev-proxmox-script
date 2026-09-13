@@ -14,21 +14,22 @@ There used to be a separate `install.sh` wrapper and a file named `Proxmox scrip
 
 This script is meant to run **on the Proxmox host** (needs `qm`, `pvesm`, `genisoimage` on PATH) with `autounattend.xml` present in the same working directory. There is no test suite — it can't be meaningfully unit tested outside a real Proxmox host, so treat any change as needing careful manual/read-through review rather than `npm test`-style verification.
 
-## Known issue — `ISO_PATH_ROOT` is undefined
+## Fixed 2026-09-13 — `ISO_PATH_ROOT` undefined, no error handling, CRLF line endings
 
-Commit `457da5c` ("Refactor Proxmox script for clarity and updates") deleted the block that dynamically resolved `ISO_PATH_ROOT` via `pvesm path "$ISO_STORAGE_ID:iso/dummy"` (and the accompanying cleanup trap), but `win11.sh` still references `$ISO_PATH_ROOT` in several places (ISO search, download destination, VirtIO ISO check). As it stands the variable is always empty, so:
+Commit `457da5c` ("Refactor Proxmox script for clarity and updates") had deleted the block that dynamically resolved `ISO_PATH_ROOT` via `pvesm path "$ISO_STORAGE_ID:iso/dummy"` and the accompanying `ERR` cleanup trap, while `win11.sh` still referenced `$ISO_PATH_ROOT` in several places (ISO search, download destination, VirtIO ISO check). With the variable always empty, `download_windows_iso` would write multi-GB downloads to `/` (the host filesystem root, since this runs as root) instead of Proxmox ISO storage, and the VirtIO/local-ISO checks would never find anything real.
 
-- The `find "$ISO_PATH_ROOT" ...` ISO search effectively searches an empty/invalid path.
-- `download_windows_iso` writes the downloaded ISO to `"$ISO_PATH_ROOT/$target_filename"`, i.e. `/$target_filename` — the **root of the host filesystem**, not Proxmox ISO storage. Since this script is normally run as root on the Proxmox node, that write can silently succeed and dump a multi-GB file at `/`, while the later `qm set --ide2 $ISO_STORAGE_ID:iso/$WIN_ISO` looks for it inside the storage's actual iso directory and fails (or worse, half-succeeds against unrelated storage).
-- The VirtIO ISO existence check (`$ISO_PATH_ROOT/$VIRTIO_ISO`) will always fail unless something coincidentally exists at that path off `/`.
+This has been restored (`get_iso_path`/`DUMMY_PATH`/`ISO_PATH_ROOT` resolution + `trap cleanup ERR`, matching what existed pre-`457da5c`), plus:
 
-**Do not treat the script as working out of the box.** If asked to fix or extend `win11.sh`, restore path resolution (e.g. reinstate the `pvesm path` lookup that was deleted in `457da5c`) before relying on any of the ISO-handling logic. This was flagged during review on 2026-09-13 and intentionally left unfixed pending the user's direction — check history/README for whether it's since been addressed.
+- Added `set -e` right after the shebang so a failed `qm create`/`qm set` actually stops the script instead of it reporting "VM created successfully!" over a half-configured VM. The restored `DUMMY_PATH=$(pvesm path ...) || true` line is deliberately guarded so a storage-resolution failure still prints the friendly error message instead of dying silently under `set -e`.
+- Converted the file from CRLF to LF line endings — it had been CRLF since before the rename (the earlier "Fix line endings" commit only ever touched the old `install.sh`), which made `bash win11.sh` fail with a syntax error on the `case ... in` line. **If you see CRLF creep back in (e.g. someone edits/saves the file on Windows), reflow it (`sed -i 's/\r$//' win11.sh`) — the script does not run at all as CRLF.**
+
+If you touch the ISO-handling or error-handling logic again, keep these in mind:
+- Avoid combining `set -e` with `set -o pipefail` here without auditing every pipeline first — `download_windows_iso`'s `curl | grep | sed | tr` relies on `tr` (always exit 0) being last so a header-not-found `grep` miss doesn't kill the script; `pipefail` would break that.
+- `pvesm path ...`/similar lookups that feed a "did this fail?" `if [ -z ... ]` check need `|| true` (or equivalent) so `set -e` doesn't short-circuit past the friendly error message.
 
 ## Other things to keep in mind when touching `win11.sh`
 
-- No `set -e`/`set -euo pipefail` — failed `qm set` calls after a successful `qm create` won't stop the script, so partially-configured VMs can be reported as "created successfully". Consider this when adding new steps.
-- The admin password is passed as a plaintext CLI arg (`-p`) and written in plaintext into the generated `autounattend.xml` (`PlainText>true`), so it lands in shell history, `ps` output, and on the ISO storage as an unencrypted file. Treat this as a dev/lab-only tool, not something to point at production credentials.
-- The cleanup `trap` that deleted the generated OEM ISO on failure was removed in the same refactor that broke `ISO_PATH_ROOT` — failed runs can now leave orphaned `win11-unattend-*.iso` files on ISO storage.
+- The admin password is passed as a plaintext CLI arg (`-p`) and written in plaintext into the generated `autounattend.xml` (`PlainText>true`), so it lands in shell history, `ps` output, and on the ISO storage as an unencrypted file. Treat this as a dev/lab-only tool, not something to point at production credentials. Not fixed — flagged for awareness only.
 - `autounattend.xml` sets `LogonCount>999` under `AutoLogon`, i.e. the VM auto-logs-in as `Admin` indefinitely across reboots. That's convenient for a throwaway dev VM but worth calling out if this is ever adapted for anything longer-lived.
 
 ## Conventions
