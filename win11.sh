@@ -32,9 +32,9 @@ VIRTIO_STABLE_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downlo
 OEM_ISO="win11-unattend-${VMID}.iso" # Generated ISO name
 ANSWER_FILE="autounattend.xml"
 
-DISK_SIZE="130" # GiB, no unit suffix - `qm set --scsiN storage:SIZE` parses SIZE as a plain
-                # number of GiB; a suffix like "130G" makes it try to attach an existing
-                # volume named "130G" instead of allocating a new disk, and fails with
+DISK_SIZE="128" # GiB, no unit suffix - `qm set --scsiN storage:SIZE` parses SIZE as a plain
+                # number of GiB; a suffix like "128G" makes it try to attach an existing
+                # volume named "128G" instead of allocating a new disk, and fails with
                 # "unable to parse lvm/... volume name '130G'" on lvm/zfs storage.
 OS_TYPE="win11"
 
