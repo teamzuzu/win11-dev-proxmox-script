@@ -9,11 +9,13 @@ This project automates the creation of a fully configured Windows 11 Development
 - **Fully Automated VM Creation**: One-command deployment from Proxmox shell — the script starts the VM itself and clears Windows Setup's "Press any key to boot..." prompt for you (see Troubleshooting)
 - **Unattended Windows 11 Installation**: No manual intervention required
 - **VirtIO Drivers**: Automatically loads storage and network drivers during setup
+- **QEMU Guest Agent**: Installed from the VirtIO ISO at first logon, so Proxmox's guest-agent features (IP reporting, graceful shutdown, etc.) work out of the box
 - **Debloated Windows**: Telemetry, bloatware, search suggestions, Widgets, Start suggestion ads, and Game Bar/GameDVR all disabled
 - **Pre-installed Development Environment**:
   - Visual Studio 2022 Professional with the Desktop development with C++ workload
   - Visual Studio Code
   - Git, CMake, Python (+ `capstone`)
+  - WSL + the latest Ubuntu (staged automatically; needs one manual restart + first Ubuntu launch to finish — see the note below)
 - **Remote Access Enabled**: OpenSSH and Remote Desktop both pre-configured and open (firewall is disabled — dev/lab use, see the security note below)
 - **Resource Optimized**: 16GB RAM and 6 CPU cores by default (customizable)
 
@@ -64,6 +66,7 @@ The answer file handles the Windows setup. Key configurations include:
 *   **User**: Creates a local user named `Admin`.
 *   **Language/Region**: Defaults to `en-GB` (English - United Kingdom), set in two places — `Microsoft-Windows-International-Core-WinPE` (Setup's own UI) and `Microsoft-Windows-International-Core` (the installed OS's region/keyboard, which is what actually suppresses OOBE's language-selection prompt on first boot). To use a different locale, change all `en-GB` occurrences in both components to your BCP-47 tag (e.g. `en-US`, `en-AU`).
 *   **Debloat**: Automatically disables Telemetry, "Consumer Features" (Candy Crush, etc.), Search Suggestions, Widgets, Start Menu/Settings suggestion ads, and Xbox Game Bar/GameDVR (the last one avoids the overlay hooking into D3D11 apps, relevant if you're building a game).
+*   **QEMU Guest Agent**: Installed silently from the VirtIO ISO's `guest-agent\qemu-ga-x64.msi` (the script searches all CD-ROM drive letters for it, since the VirtIO ISO's letter shifts depending on how many optical devices are attached — same reasoning as the storage-driver paths above).
 *   **Network**: Forces the network connection to the `Private` category (Windows' own `NetworkLocation` OOBE setting isn't always honored) and **disables Windows Firewall entirely, on all profiles**. This is a dev/lab-only default — see the security note below.
 *   **Remote Access**: Enables Remote Desktop (the `Admin` user can connect immediately, since it's a member of `Administrators`) and OpenSSH Server, both with their own firewall-allow rules kept as a fallback even though the firewall is off.
 *   **Software**: Automatically installs the following via Chocolatey:
@@ -71,6 +74,7 @@ The answer file handles the Windows setup. Key configurations include:
     *   Visual Studio Code
     *   CMake, Python (with the `capstone` pip package)
     *   Visual Studio 2022 Professional with the **Desktop development with C++** workload (native/MSVC, not .NET) — swap `visualstudio2022-workload-nativedesktop` in `autounattend.xml` for a different [VS2022 workload ID](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-professional) if your project needs something else instead.
+*   **WSL**: `wsl --install -d Ubuntu` runs at first logon, which stages WSL and downloads the latest Ubuntu — but it can't finish unattended. It needs one manual restart (to enable the underlying Windows/Hyper-V features) followed by launching Ubuntu once from the Start menu, where you'll be prompted to create the Linux username/password interactively. **This also requires nested virtualization to be enabled on the Proxmox host itself** (`nested=1` for the `kvm_intel`/`kvm_amd` module) — without it, WSL2 will fail to actually start a Linux VM even though the install step succeeded. See the Troubleshooting section if Ubuntu won't launch after restarting.
 
 > ⚠️ **Security note:** this VM ships with the firewall fully disabled, RDP and SSH both open, and (by default) a well-known password. That's a reasonable default for an isolated home-lab network, but treat it accordingly — don't expose this VM directly to the internet, and change the password (`-p`) if the VM will be reachable by anyone else.
 
@@ -78,6 +82,17 @@ The answer file handles the Windows setup. Key configurations include:
 
 ### 1. Proxmox VE
 Tested on Proxmox VE 8.x. Should work on 7.x as well.
+
+**Nested virtualization** (only needed for WSL/Ubuntu to actually run — everything else in this script works without it): WSL2 relies on Hyper-V-style virtualization inside the guest, so the physical Proxmox host's CPU virtualization extensions need to be passed through one level deeper. Enable it on the Proxmox host before first boot:
+```bash
+# Intel:
+echo "options kvm_intel nested=1" > /etc/modprobe.d/kvm-intel-nested.conf
+# AMD:
+echo "options kvm_amd nested=1" > /etc/modprobe.d/kvm-amd-nested.conf
+# then reload the module (or reboot the host)
+modprobe -r kvm_intel kvm_amd 2>/dev/null; modprobe kvm_intel kvm_amd 2>/dev/null
+```
+`win11.sh` already sets `--cpu host` on the VM, which passes the necessary VMX/SVM CPU flags through as long as the host itself has nested virtualization turned on — no VM-side change needed once that's set.
 
 ### 0. Running as a non-root user
 `win11.sh` runs `qm`, `pvesm`, `genisoimage`, and all ISO-storage file operations through `sudo`, so it no longer needs to be run as `root` directly — any user with `sudo` rights can run it. The script checks `sudo -v` up front and exits with a clear error if that fails. Since parts of the ISO-handling flow are unattended (auto-downloading the VirtIO ISO, generating the answer-file ISO), it's worth giving this user passwordless `sudo` for a smooth run rather than being prompted for a password partway through:
@@ -163,7 +178,10 @@ This is a first-logon session/`PATH` timing issue, not a broken package: Chocola
 - If needed, manually browse to the VirtIO ISO's `vioscsi\w11\amd64` folder during Windows setup — not `viostor`, since the disk is attached via a VirtIO-SCSI controller
 
 ### VM seems stuck at a black/blank console screen right after start
-`win11.sh` now starts the VM itself and sends Enter to the console repeatedly for ~90 seconds, to clear Windows Setup's "Press any key to boot from CD or DVD..." UEFI prompt (it only waits a few seconds for a keypress, then falls through to the next boot device — without this it can look like an indefinite hang to whoever isn't watching the console at exactly that moment). If you open the console and it's already past that prompt, this already worked — no action needed. If it's still sitting at that exact prompt after ~90 seconds, press a key manually once and check `qm status <vmid>`/the console for what's actually happening; that's no longer expected behavior.
+`win11.sh` now starts the VM itself and sends Enter to the console repeatedly for ~15 seconds, to clear Windows Setup's "Press any key to boot from CD or DVD..." UEFI prompt (it only waits a few seconds for a keypress, then falls through to the next boot device — without this it can look like an indefinite hang to whoever isn't watching the console at exactly that moment). If you open the console and it's already past that prompt, this already worked — no action needed. If it's still sitting at that exact prompt after ~15 seconds, press a key manually once and check `qm status <vmid>`/the console for what's actually happening; that's no longer expected behavior. (If this keeps happening on slower hardware, the wait may need lengthening again — see `CLAUDE.md`.)
+
+### WSL/Ubuntu won't launch after restarting ("virtual machine could not be started" or similar)
+This almost always means nested virtualization isn't enabled on the Proxmox host — see the Prerequisites section above. Confirm from inside the guest with `systeminfo` (look for "Virtualization Enabled In Firmware: Yes" and "A hypervisor has been detected") or `Get-ComputerInfo -Property HyperV*`. If that all looks fine and it still fails, run `wsl --install -d Ubuntu` manually from an elevated PowerShell prompt to see the actual error instead of the silent failure of an unattended first-logon command.
 
 ## 📝 License
 
