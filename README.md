@@ -63,13 +63,14 @@ The answer file handles the Windows setup. Key configurations include:
 
 *   **User**: Creates a local user named `Admin`.
 *   **Language/Region**: Defaults to `en-GB` (English - United Kingdom), set in two places — `Microsoft-Windows-International-Core-WinPE` (Setup's own UI) and `Microsoft-Windows-International-Core` (the installed OS's region/keyboard, which is what actually suppresses OOBE's language-selection prompt on first boot). To use a different locale, change all `en-GB` occurrences in both components to your BCP-47 tag (e.g. `en-US`, `en-AU`).
-*   **Debloat**: Automatically disables Telemetry, "Consumer Features" (Candy Crush, etc.), and Search Suggestions.
+*   **Debloat**: Automatically disables Telemetry, "Consumer Features" (Candy Crush, etc.), Search Suggestions, Widgets, Start Menu/Settings suggestion ads, and Xbox Game Bar/GameDVR (the last one avoids the overlay hooking into D3D11 apps, relevant if you're building a game).
 *   **Network**: Forces the network connection to the `Private` category (Windows' own `NetworkLocation` OOBE setting isn't always honored) and **disables Windows Firewall entirely, on all profiles**. This is a dev/lab-only default — see the security note below.
 *   **Remote Access**: Enables Remote Desktop (the `Admin` user can connect immediately, since it's a member of `Administrators`) and OpenSSH Server, both with their own firewall-allow rules kept as a fallback even though the firewall is off.
 *   **Software**: Automatically installs the following via Chocolatey:
     *   Git
     *   Visual Studio Code
-    *   Visual Studio 2022 Professional (NetDesktop Workload)
+    *   CMake, Python (with the `capstone` pip package)
+    *   Visual Studio 2022 Professional with the **Desktop development with C++** workload (native/MSVC, not .NET) — swap `visualstudio2022-workload-nativedesktop` in `autounattend.xml` for a different [VS2022 workload ID](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-professional) if your project needs something else instead.
 
 > ⚠️ **Security note:** this VM ships with the firewall fully disabled, RDP and SSH both open, and (by default) a well-known password. That's a reasonable default for an isolated home-lab network, but treat it accordingly — don't expose this VM directly to the internet, and change the password (`-p`) if the VM will be reachable by anyone else.
 
