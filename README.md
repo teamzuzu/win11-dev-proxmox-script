@@ -2,7 +2,7 @@
 
 ![Proxmox + Windows 11 Automated Script](w11prox.png)
 
-This project automates the creation of a fully configured Windows 11 Development VM on Proxmox. It handles VM creation, unattended Windows installation, debloating, and the installation of essential development tools (VS2022, VS Code, Git, CMake, Python, OpenSSH, RDP).
+This project automates the creation of a fully configured Windows 11 Development VM on Proxmox. It handles VM creation, unattended Windows installation, debloating, and the installation of essential development tools (VS2022, Git, CMake, Python, OpenSSH, RDP).
 
 ## ✨ Features
 
@@ -13,9 +13,7 @@ This project automates the creation of a fully configured Windows 11 Development
 - **Debloated Windows**: Telemetry, bloatware, search suggestions, Widgets, Start suggestion ads, Game Bar/GameDVR, and "new Outlook for Windows" all disabled/removed
 - **Pre-installed Development Environment**:
   - Visual Studio 2022 Professional with the Desktop development with C++ workload
-  - Visual Studio Code
   - Git, CMake, Python (+ `capstone`)
-  - WSL + the latest Ubuntu (staged automatically; needs one manual restart + first Ubuntu launch to finish — see the note below)
 - **Remote Access Enabled**: OpenSSH and Remote Desktop both pre-configured and open (firewall is disabled — dev/lab use, see the security note below)
 - **Resource Optimized**: 8GB RAM and 4 CPU cores by default (customizable), with the pagefile disabled entirely — see below
 - **No Pagefile**: Virtual memory/pagefile disabled at first logon, trading crash-dump capability for disk space on a VM that already gets RAM sized deliberately
@@ -72,10 +70,8 @@ The answer file handles the Windows setup. Key configurations include:
 *   **Remote Access**: Enables Remote Desktop (the `Admin` user can connect immediately, since it's a member of `Administrators`) and OpenSSH Server, both with their own firewall-allow rules kept as a fallback even though the firewall is off.
 *   **Software**: Automatically installs the following via Chocolatey:
     *   Git
-    *   Visual Studio Code
     *   CMake, Python (with the `capstone` pip package)
     *   Visual Studio 2022 Professional with the **Desktop development with C++** workload (native/MSVC, not .NET) — swap `visualstudio2022-workload-nativedesktop` in `autounattend.xml` for a different [VS2022 workload ID](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-professional) if your project needs something else instead.
-*   **WSL**: `wsl --install -d Ubuntu` runs at first logon, which stages WSL and downloads the latest Ubuntu — but it can't finish unattended. It needs one manual restart (to enable the underlying Windows/Hyper-V features) followed by launching Ubuntu once from the Start menu, where you'll be prompted to create the Linux username/password interactively. **This also requires nested virtualization to be enabled on the Proxmox host itself** (`nested=1` for the `kvm_intel`/`kvm_amd` module) — without it, WSL2 will fail to actually start a Linux VM even though the install step succeeded. See the Troubleshooting section if Ubuntu won't launch after restarting.
 *   **Pagefile**: Disabled entirely at first logon (`AutomaticManagedPagefile` turned off, then any existing pagefile setting removed) — trades away Windows' ability to write a crash dump on a BSOD, in exchange for not burning disk space on virtual memory for what's meant to be a disposable dev VM.
 
 > ⚠️ **Security note:** this VM ships with the firewall fully disabled, RDP and SSH both open, and (by default) a well-known password. That's a reasonable default for an isolated home-lab network, but treat it accordingly — don't expose this VM directly to the internet, and change the password (`-p`) if the VM will be reachable by anyone else.
@@ -84,17 +80,6 @@ The answer file handles the Windows setup. Key configurations include:
 
 ### 1. Proxmox VE
 Tested on Proxmox VE 8.x. Should work on 7.x as well.
-
-**Nested virtualization** (only needed for WSL/Ubuntu to actually run — everything else in this script works without it): WSL2 relies on Hyper-V-style virtualization inside the guest, so the physical Proxmox host's CPU virtualization extensions need to be passed through one level deeper. Enable it on the Proxmox host before first boot:
-```bash
-# Intel:
-echo "options kvm_intel nested=1" > /etc/modprobe.d/kvm-intel-nested.conf
-# AMD:
-echo "options kvm_amd nested=1" > /etc/modprobe.d/kvm-amd-nested.conf
-# then reload the module (or reboot the host)
-modprobe -r kvm_intel kvm_amd 2>/dev/null; modprobe kvm_intel kvm_amd 2>/dev/null
-```
-`win11.sh` already sets `--cpu host` on the VM, which passes the necessary VMX/SVM CPU flags through as long as the host itself has nested virtualization turned on — no VM-side change needed once that's set.
 
 ### 0. Running as a non-root user
 `win11.sh` runs `qm`, `pvesm`, `genisoimage`, and all ISO-storage file operations through `sudo`, so it no longer needs to be run as `root` directly — any user with `sudo` rights can run it. The script checks `sudo -v` up front and exits with a clear error if that fails. Since parts of the ISO-handling flow are unattended (auto-downloading the VirtIO ISO, generating the answer-file ISO), it's worth giving this user passwordless `sudo` for a smooth run rather than being prompted for a password partway through:
@@ -145,7 +130,7 @@ After the VM finishes installing (approximately 30-60 minutes depending on your 
   ```
 
 ### Verify Installation
-1. Check that Visual Studio 2022, VS Code, and Git are installed
+1. Check that Visual Studio 2022 and Git are installed
 2. Verify OpenSSH is running:
    ```powershell
    Get-Service sshd
@@ -163,7 +148,7 @@ The VS2022 installation is large (~10GB download). If the VM seems idle after fi
 - Allow 20-30 minutes for Visual Studio to complete
 - Check `C:\ProgramData\chocolatey\logs` for installation logs (it's a hidden folder - `dir C:\ /a` if it's not showing up)
 
-### Chocolatey installed but Git/VS Code/VS2022 didn't
+### Chocolatey installed but Git/VS2022 didn't
 This is a first-logon session/`PATH` timing issue, not a broken package: Chocolatey adds itself to the system `PATH` when it installs, but the `FirstLogonCommands` batch that installs it doesn't pick that change up for the *rest of that same batch* - so a bare `choco install ...` right after can silently fail to find `choco` at all, with nothing written to `chocolatey.log`. Already fixed here by calling Chocolatey via its full path (`C:\ProgramData\chocolatey\bin\choco.exe`) rather than bare `choco` - if you're hitting this on an older-generated answer-file ISO, rebuild it (rerun `win11.sh`).
 
 ### `git` (or another choco-installed tool) "not recognized" right after first login
@@ -184,9 +169,6 @@ Same root cause as above, one layer further out: Git's installer *does* correctl
 
 ### VM seems stuck at a black/blank console screen right after start
 `win11.sh` now starts the VM itself and sends Enter to the console repeatedly for ~15 seconds, to clear Windows Setup's "Press any key to boot from CD or DVD..." UEFI prompt (it only waits a few seconds for a keypress, then falls through to the next boot device — without this it can look like an indefinite hang to whoever isn't watching the console at exactly that moment). If you open the console and it's already past that prompt, this already worked — no action needed. If it's still sitting at that exact prompt after ~15 seconds, press a key manually once and check `qm status <vmid>`/the console for what's actually happening; that's no longer expected behavior. (If this keeps happening on slower hardware, the wait may need lengthening again — see `CLAUDE.md`.)
-
-### WSL/Ubuntu won't launch after restarting ("virtual machine could not be started" or similar)
-This almost always means nested virtualization isn't enabled on the Proxmox host — see the Prerequisites section above. Confirm from inside the guest with `systeminfo` (look for "Virtualization Enabled In Firmware: Yes" and "A hypervisor has been detected") or `Get-ComputerInfo -Property HyperV*`. If that all looks fine and it still fails, run `wsl --install -d Ubuntu` manually from an elevated PowerShell prompt to see the actual error instead of the silent failure of an unattended first-logon command.
 
 ### Unexpected region/country prompt during setup
 Windows 11 installs "new Outlook for Windows" via a Store-driven task that runs during OOBE itself, and that Store interaction can surface a region/market prompt that has nothing to do with the language/locale settings elsewhere in `autounattend.xml`. `autounattend.xml` sets a registry blocklist for this before OOBE runs, plus deprovisions the app package at first logon (see `CLAUDE.md`) — if you're still seeing the prompt on a freshly generated ISO, the blocklist mechanism (`BlockedOobeUpdaters`) is only officially documented for Windows 10, not confirmed on Windows 11, so it may not fully suppress this yet. If it recurs, note the exact prompt text/screen and check `CLAUDE.md`'s Outlook section for the current state of the investigation before assuming something else broke.

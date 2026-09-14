@@ -297,21 +297,16 @@
                     <Description>Install Git</Description>
                     <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install git -y"</CommandLine>
                 </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>19</Order>
-                    <Description>Install VS Code</Description>
-                    <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install vscode -y"</CommandLine>
-                </SynchronousCommand>
 
                 <!-- pgr2-recomp toolchain: CMake 3.20+, Python 3.10+ w/ capstone, VS2022
                      with the C++ (not .NET) desktop workload - see CLAUDE.md -->
                 <SynchronousCommand wcm:action="add">
-                    <Order>20</Order>
+                    <Order>19</Order>
                     <Description>Install CMake</Description>
                     <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install cmake -y"</CommandLine>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
-                    <Order>21</Order>
+                    <Order>20</Order>
                     <Description>Install Python</Description>
                     <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install python -y"</CommandLine>
                 </SynchronousCommand>
@@ -320,36 +315,25 @@
                      here rather than guessing a path, same underlying issue as choco.exe
                      above but a full path isn't reliable for this one - see CLAUDE.md -->
                 <SynchronousCommand wcm:action="add">
-                    <Order>22</Order>
+                    <Order>21</Order>
                     <Description>Install capstone (pip)</Description>
                     <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User'); python -m pip install capstone"</CommandLine>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
-                    <Order>23</Order>
+                    <Order>22</Order>
                     <Description>Install Visual Studio 2022 Professional</Description>
                     <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install visualstudio2022professional -y"</CommandLine>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
-                    <Order>24</Order>
+                    <Order>23</Order>
                     <Description>Install VS2022 Desktop C++ Workload</Description>
                     <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "C:\ProgramData\chocolatey\bin\choco.exe install visualstudio2022-workload-nativedesktop -y"</CommandLine>
-                </SynchronousCommand>
-
-                <!-- WSL + latest Ubuntu. Plain "Ubuntu" (no version suffix) always
-                     resolves to Canonical's current default release. Only installs/
-                     stages everything - needs a manual restart + first Ubuntu launch
-                     to finish (interactive Linux user creation), and needs nested
-                     virtualization enabled on the Proxmox host - see CLAUDE.md -->
-                <SynchronousCommand wcm:action="add">
-                    <Order>25</Order>
-                    <Description>Install WSL + latest Ubuntu</Description>
-                    <CommandLine>wsl --install -d Ubuntu</CommandLine>
                 </SynchronousCommand>
 
                 <!-- Disable the pagefile entirely - dev VM, disk space over crash-dump
                      capability, see CLAUDE.md -->
                 <SynchronousCommand wcm:action="add">
-                    <Order>26</Order>
+                    <Order>24</Order>
                     <Description>Disable Pagefile</Description>
                     <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$cs = Get-CimInstance Win32_ComputerSystem; $cs.AutomaticManagedPagefile = $false; Set-CimInstance -InputObject $cs; Get-CimInstance Win32_PageFileSetting | Remove-CimInstance -ErrorAction SilentlyContinue"</CommandLine>
                 </SynchronousCommand>

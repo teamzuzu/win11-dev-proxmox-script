@@ -203,7 +203,7 @@ sudo qm create "$VMID" \
   --sockets "1" \
   --net0 virtio,bridge=vmbr0 \
   --ostype "win11" \
-  --scsihw virtio-scsi-pci \
+  --scsihw virtio-scsi-single \
   --cpu host \
   --machine q35 \
   --balloon 0 \
