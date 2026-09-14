@@ -157,9 +157,26 @@ The "registry-only" block above **also crashed Setup** the same way ("the comput
 
 Verified after reverting: `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` passes, `specialize`'s `RunSynchronous` block contains exactly the one `RunSynchronousCommand` (`BypassNRO`), confirmed no `powershell` string anywhere in that pass's XML. The "does the install complete now" outcome again needs confirming on the next live test.
 
+### Third failure, 2026-09-14: the same command also hangs in `FirstLogonCommands` - removed entirely, Outlook deprovisioning abandoned
+
+The revert above fixed the crash (confirmed - install completed), but the *same* `Get-AppxProvisionedPackage`/`Remove-AppxProvisionedPackage` command, still sitting in `FirstLogonCommands` (`Order 8`) since `e863584`, hung there instead: a visible PowerShell console window sat unresponsive until the user manually closed it, at which point the batch resumed and the remaining steps (QEMU Guest Agent, network/firewall config, Chocolatey, app installs - `Order 9` onward) all ran to completion on their own with no further intervention. Diagnosed as `Order 8` specifically (not e.g. the QEMU Guest Agent step right after it) because nothing *after* the point where the user intervened needed a second manual close - only one thing hung.
+
+**This means three separate failures now all trace back to the exact same resource** - `HKLM\...\WindowsUpdate\Orchestrator\UScheduler_Oobe` and/or the `Microsoft.OutlookForWindows` package it drives - across three different mechanisms and two different unattend.xml passes:
+1. DISM/Appx cmdlets in `specialize` → crash (fatal nonzero exit).
+2. Registry-only cmdlets in `specialize` → crash (fatal nonzero exit), same symptom, different mechanism.
+3. The original DISM/Appx cmdlets in `FirstLogonCommands` (post-OOBE, where failures are normally non-fatal) → hang instead of a crash, because a stuck-but-not-exited process just blocks the synchronous batch rather than tripping Setup's fatal-exit-code handling.
+
+The common thread across all three, regardless of pass or mechanism: Windows' own Update Orchestrator is actively working this exact same registry subtree/package around OOBE and immediately after first logon (that's the whole reason it's able to show the region prompt in the first place - see the "Deprovisioned new Outlook" section above). Anything this script runs that touches it collides with that live, concurrent, OS-driven process - as a fatal error pre-OOBE, or a lock-wait hang post-OOBE, but either way it doesn't matter *how carefully-written* the touching command is (both a "risky" DISM approach and a "safe, registry-only" approach failed identically), just *that* it touches this specific resource during this specific boot window.
+
+**Removed the `Order 8` "Deprovision new Outlook for Windows" `SynchronousCommand` entirely from `FirstLogonCommands`** (everything after it renumbered down, now contiguous `1`-`23`) - not replacing it with a fourth variant. Three failures against the same resource is enough evidence that automating this specific cleanup *anywhere* in the unattend-driven boot/first-logon window isn't reliable, regardless of technique. **Outlook removal is now fully abandoned from this script** - no pre-OOBE prevention, no post-OOBE deprovisioning. The region/market prompt during OOBE (if it appears) is purely cosmetic and doesn't block the install; a user who wants Outlook actually gone afterward should do it manually, well after first-logon churn has settled (e.g. open a shell a minute or two after the desktop is up and stable, then run `Get-AppxProvisionedPackage -Online | Where-Object { $_.PackageName -like 'Microsoft.OutlookForWindows*' } | Remove-AppxProvisionedPackage -Online` by hand) - by then Windows' own Update Orchestrator activity around this package should have settled, so the same command that hung here should just work.
+
+**If Outlook removal is ever revisited, don't try it as a `RunSynchronousCommand`/`SynchronousCommand` in `autounattend.xml` at all** - the evidence points at *timing relative to OOBE*, not command correctness, as the actual constraint. A genuinely different approach would be needed, e.g. a scheduled task created at first logon that fires a few minutes *later* (well clear of the OOBE-adjacent window), not another variant of "run this command earlier/more carefully." Don't re-attempt the direct approach a fourth time without that kind of structural change.
+
+Verified after removal: `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` passes, `FirstLogonCommands`' `<Order>` sequence is contiguous `1`-`23`, `grep`-confirmed no remaining `Outlook`/`Appx` references in the file other than this historical commentary. The install completing cleanly with no hang still needs confirming on the next live test.
+
 ## Pagefile disabled at first logon (2026-09-13)
 
-Added `Order 25` (new last entry) to `autounattend.xml`'s `FirstLogonCommands`, per explicit user request:
+Added as the last entry (`Order` has shifted a few times since as other entries were added/removed - see the file itself for the current number) to `autounattend.xml`'s `FirstLogonCommands`, per explicit user request:
 ```
 $cs = Get-CimInstance Win32_ComputerSystem; $cs.AutomaticManagedPagefile = $false; Set-CimInstance -InputObject $cs; Get-CimInstance Win32_PageFileSetting | Remove-CimInstance -ErrorAction SilentlyContinue
 ```
