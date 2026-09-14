@@ -127,18 +127,10 @@
                     <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
                     <Description>Bypass MSA Requirement</Description>
                 </RunSynchronousCommand>
-                <!-- Block Windows Update Orchestrator's OOBE-time "new Outlook" install task
-                     before OOBE runs. Registry-only (no DISM/Appx cmdlets, which crashed Setup
-                     here before - see CLAUDE.md) so it's safe alongside Setup's own servicing.
-                     The actual package deprovisioning still happens post-OOBE in
-                     FirstLogonCommands; this is what has a chance of stopping the OOBE-time
-                     Store prompt itself. Builds the ["MS_Outlook"] value via [char]34 rather
-                     than an embedded literal quote, to sidestep command-line escaping entirely -->
-                <RunSynchronousCommand wcm:action="add">
-                    <Order>2</Order>
-                    <Path>powershell -NoProfile -ExecutionPolicy Bypass -Command "$v = '[' + [char]34 + 'MS_Outlook' + [char]34 + ']'; New-Item -Path 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe' -Force | Out-Null; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe' -Name 'BlockedOobeUpdaters' -Value $v -Type String -Force; Remove-Item -Path 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate' -Force -ErrorAction SilentlyContinue"</Path>
-                    <Description>Block OOBE-time new Outlook install</Description>
-                </RunSynchronousCommand>
+                <!-- Do NOT add anything else here. Two separate attempts at a second
+                     RunSynchronousCommand in this pass (a DISM/Appx-based Outlook removal,
+                     then a "registry-only" one) both crashed Windows Setup with "the
+                     computer restarted unexpectedly" - see CLAUDE.md before trying again -->
             </RunSynchronous>
         </component>
     </settings>
